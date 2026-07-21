@@ -18,7 +18,9 @@ from columnflow.columnar_util import (
 )
 from columnflow.util import maybe_import
 
-from multilepton.util import IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15
+from multilepton.util import (
+    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_RUN_3_2024,
+)
 from multilepton.selection.muon_mva import compute_muon_mva_score
 from multilepton.selection.electron_mva import compute_electron_mva_score
 from multilepton.config.util import Trigger
@@ -194,6 +196,11 @@ def get_cone_pt_from_jetidx(
         "Electron.{pt,eta,phi,dxy,dz}",
         "Electron.{pfRelIso03_all,seediEtaOriX,seediPhiOriY,sip3d,miniPFRelIso_all,sieie}",
         "Electron.{hoe,eInvMinusPInv,convVeto,lostHits,jetPtRelv2,jetIdx}",
+        # custom electron LeptonMVA input branches: without these declared here columnflow does
+        # not load them, so compute_electron_mva_score silently fed zeros -> degraded score.
+        "Electron.{miniPFRelIso_chg,deltaEtaSC,mvaNoIso}", "Jet.nConstituents",
+        # v2 model inputs (jetDF = per-lepton DeepJet disc of associated jet, only exists in 2024)
+        "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Electron.jetDF"),
         "Jet.{pt,eta,phi}",
         IF_NANO_V12("Electron.mvaTTH", "Jet.btagPNetB"),
         IF_NANO_V14("Electron.promptMVA"),
@@ -283,6 +290,90 @@ def electron_selection(
     else:
         raise ValueError(f"Invalid electron_mva_source '{electron_mva_source}'. "
                        f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
+    # =========================================
+    # MVA comparison debugging (gen-matched ROC check)
+    # =========================================
+    # NOTE: counting how many electrons pass a fixed *numeric* cut (e.g. 0.3) on both
+    # scores is NOT a valid comparison: the custom and nanoAOD scores live on different
+    # scales, so 0.3 is a different working point for each, and the sample here mixes
+    # prompt (signal) and fake (background) electrons. A ROC gain only shows up when you
+    # (a) separate signal/background via truth and (b) compare at a MATCHED efficiency.
+    debug = True
+    if debug and self.dataset_inst.is_mc and "genPartFlav" in events.Electron.fields:
+        try:
+            custom = ak.to_numpy(ak.flatten(compute_electron_mva_score(events))).astype(np.float64)
+        except Exception as cmp_e:
+            logger.warning_once(f"[Comparison] custom electron MVA failed ({cmp_e})")
+            custom = None
+
+        # same nanoAOD score the selection actually uses
+        if "promptMVA" in events.Electron.fields:
+            nano = ak.to_numpy(ak.flatten(events.Electron.promptMVA)).astype(np.float64)
+        else:
+            nano = ak.to_numpy(ak.flatten(events.Electron.mvaTTH)).astype(np.float64)
+
+        flav = ak.to_numpy(ak.flatten(events.Electron.genPartFlav))
+        is_sig = (flav == 1)          # prompt electron -> signal
+        is_bkg = (flav == 0)          # jet fake        -> background
+        keep = is_sig | is_bkg        # drop tau/photon-conversion electrons for a clean 2-class ROC
+
+        if custom is not None and is_sig.sum() > 0 and is_bkg.sum() > 0:
+            y = is_sig[keep].astype(int)
+            xc, xn = custom[keep], nano[keep]
+            n_sig, n_bkg = int(y.sum()), int((y == 0).sum())
+
+            # threshold-free discrimination: AUC (this is what the ROC "gain" reflects)
+            from sklearn.metrics import roc_auc_score
+            auc_c, auc_n = roc_auc_score(y, xc), roc_auc_score(y, xn)
+
+            # apples-to-apples working point: take nano's signal eff at its 0.3 cut, find the
+            # custom threshold giving the SAME signal eff, then compare background efficiency
+            sig_eff_nano = float((xn[y == 1] > 0.3).mean())
+            bkg_eff_nano = float((xn[y == 0] > 0.3).mean())
+            thr_c = float(np.quantile(xc[y == 1], 1.0 - sig_eff_nano))
+            bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
+
+            logger.info_once(
+                f"[Comparison] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
+                f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
+                f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
+                f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+            )
+
+            # ---- event-level yield comparison (nano vs custom) ----
+            # Count events keeping >=1 electron passing each MVA. For a FAIR comparison we use
+            # nano at its analysis cut (0.3) and custom at the threshold matched to the SAME
+            # signal efficiency (thr_c), so any yield difference reflects extra fake rejection,
+            # not just a looser/tighter numeric cut. (Stats here are one file only.)
+            n_per_evt = ak.to_numpy(ak.num(events.Electron.pt, axis=1))
+            custom_jag = ak.unflatten(custom, n_per_evt)
+            nano_jag = ak.unflatten(nano, n_per_evt)
+            nano_thr, custom_thr = 0.3, thr_c
+
+            n_evt = len(events)
+            evt_nano = int(ak.sum(ak.any(nano_jag > nano_thr, axis=1)))
+            evt_custom = int(ak.sum(ak.any(custom_jag > custom_thr, axis=1)))
+            sig_keep_nano = int(((nano > nano_thr) & is_sig).sum())
+            sig_keep_custom = int(((custom > custom_thr) & is_sig).sum())
+            fake_keep_nano = int(((nano > nano_thr) & is_bkg).sum())
+            fake_keep_custom = int(((custom > custom_thr) & is_bkg).sum())
+
+            # S/sqrt(B) significance-like figure: at matched signal eff S is ~equal, so the gain
+            # is driven by fake (B) reduction. Reported as a single number + relative gain.
+            z_nano = sig_keep_nano / np.sqrt(fake_keep_nano) if fake_keep_nano > 0 else float("inf")
+            z_custom = sig_keep_custom / np.sqrt(fake_keep_custom) if fake_keep_custom > 0 else float("inf")
+            z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
+
+            logger.info_once(
+                f"[Yield] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | "
+                f"events(>=1 sel e)/{n_evt}: nano={evt_nano} custom={evt_custom} "
+                f"(delta={evt_custom - evt_nano:+d}) | "
+                f"prompt-e kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
+                f"fake-e kept: nano={fake_keep_nano} custom={fake_keep_custom} "
+                f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
+                f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+            )
+    # =========================================
 
     # default electron mask
     tight_mask = None
@@ -417,6 +508,12 @@ def electron_trigger_matching(
     uses={
         "Muon.{pt,eta,phi,looseId,mediumId,tightId}",
         "Muon.{pfRelIso04_all,dxy,dz,sip3d,miniPFRelIso_all,jetPtRelv2,jetIdx}",
+        # custom muon LeptonMVA input branches: without these declared here columnflow does not
+        # load them, so compute_muon_mva_score silently fed zeros -> degraded score.
+        "Muon.{miniPFRelIso_chg,nTrackerLayers,segmentComp,isTracker,nStations,isGlobal}",
+        "Jet.nConstituents",
+        # v2 model inputs (jetDF = per-lepton DeepJet disc of associated jet, only exists in 2024)
+        "Muon.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Muon.jetDF"),
         "Jet.{pt,eta,phi}",
         IF_NANO_V12("Muon.mvaTTH", "Jet.btagPNetB"),
         IF_NANO_V14("Muon.promptMVA"),
@@ -498,6 +595,82 @@ def muon_selection(
         else:
             raise ValueError(f"Invalid muon_mva_source '{muon_mva_source}'. "
                            f"Choose from: 'custom' (XGBoost model), 'nanoaod' (version-based default)")
+
+        # =========================================
+        # MVA comparison debugging (gen-matched ROC check) -- mirrors the electron block.
+        # Judge success by AUC / fake-rate at matched signal efficiency, NOT by counts at a
+        # fixed numeric cut (the two scores are on different scales). Muon analysis cut is 0.5.
+        # =========================================
+        debug = True
+        if debug and self.dataset_inst.is_mc and "genPartFlav" in events.Muon.fields:
+            try:
+                mu_custom = ak.to_numpy(ak.flatten(compute_muon_mva_score(events))).astype(np.float64)
+            except Exception as cmp_e:
+                logger.warning_once(f"[Comparison] custom muon MVA failed ({cmp_e})")
+                mu_custom = None
+
+            # same nanoAOD score the selection actually uses
+            if "promptMVA" in events.Muon.fields:
+                mu_nano = ak.to_numpy(ak.flatten(events.Muon.promptMVA)).astype(np.float64)
+            else:
+                mu_nano = ak.to_numpy(ak.flatten(events.Muon.mvaTTH)).astype(np.float64)
+
+            mu_flav = ak.to_numpy(ak.flatten(events.Muon.genPartFlav))
+            mu_is_sig = (mu_flav == 1)          # prompt muon -> signal
+            mu_is_bkg = (mu_flav == 0)          # jet fake    -> background
+            mu_keep = mu_is_sig | mu_is_bkg
+
+            if mu_custom is not None and mu_is_sig.sum() > 0 and mu_is_bkg.sum() > 0:
+                y = mu_is_sig[mu_keep].astype(int)
+                xc, xn = mu_custom[mu_keep], mu_nano[mu_keep]
+                n_sig, n_bkg = int(y.sum()), int((y == 0).sum())
+
+                from sklearn.metrics import roc_auc_score
+                auc_c, auc_n = roc_auc_score(y, xc), roc_auc_score(y, xn)
+
+                # nano's signal eff at its 0.5 cut, then the custom threshold giving the SAME
+                # signal eff -> compare background efficiency
+                sig_eff_nano = float((xn[y == 1] > 0.5).mean())
+                bkg_eff_nano = float((xn[y == 0] > 0.5).mean())
+                thr_c = float(np.quantile(xc[y == 1], 1.0 - sig_eff_nano))
+                bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
+
+                logger.info_once(
+                    f"[Comparison muon] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
+                    f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
+                    f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
+                    f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+                )
+
+                # ---- event-level yield comparison (nano vs custom) at matched signal eff ----
+                n_per_evt = ak.to_numpy(ak.num(events.Muon.pt, axis=1))
+                custom_jag = ak.unflatten(mu_custom, n_per_evt)
+                nano_jag = ak.unflatten(mu_nano, n_per_evt)
+                nano_thr, custom_thr = 0.5, thr_c
+
+                n_evt = len(events)
+                evt_nano = int(ak.sum(ak.any(nano_jag > nano_thr, axis=1)))
+                evt_custom = int(ak.sum(ak.any(custom_jag > custom_thr, axis=1)))
+                sig_keep_nano = int(((mu_nano > nano_thr) & mu_is_sig).sum())
+                sig_keep_custom = int(((mu_custom > custom_thr) & mu_is_sig).sum())
+                fake_keep_nano = int(((mu_nano > nano_thr) & mu_is_bkg).sum())
+                fake_keep_custom = int(((mu_custom > custom_thr) & mu_is_bkg).sum())
+
+                # S/sqrt(B) significance-like figure (see electron block for rationale)
+                z_nano = sig_keep_nano / np.sqrt(fake_keep_nano) if fake_keep_nano > 0 else float("inf")
+                z_custom = sig_keep_custom / np.sqrt(fake_keep_custom) if fake_keep_custom > 0 else float("inf")
+                z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
+
+                logger.info_once(
+                    f"[Yield muon] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | "
+                    f"events(>=1 sel mu)/{n_evt}: nano={evt_nano} custom={evt_custom} "
+                    f"(delta={evt_custom - evt_nano:+d}) | "
+                    f"prompt-mu kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
+                    f"fake-mu kept: nano={fake_keep_nano} custom={fake_keep_custom} "
+                    f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
+                    f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+                )
+        # =========================================
 
         closestjet_indicies = events.Muon.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet

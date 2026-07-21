@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 
+export MVA_FEATURE_DEBUG=1
+export MVA_ZERO_JETPTRELV2=1
+
 task=cf.ReduceEvents
 task=cf.PlotVariables1D
 task=cf.ProvideReducedEvents
 task=cf.GetDatasetLFNs
 task=cf.SelectEvents
 
-version=test_final_mr11_2
+version=debugging_mva_manisha2_custom_ver9_mvamodel_v2__test3
 workflow=local  #  choices local, slurm, htcondor
 
 #config=22preEE_v12_central
@@ -16,12 +19,10 @@ workflow=local  #  choices local, slurm, htcondor
 config=24_v15_central
 
 requested_datasets=(
- data_mu_g
- ttzz_madgraph
+ hh_ggf_htt_hvv_kl0_kt1_powheg
 )
 requested_datasets_not_now=(
  hh_ggf_htt_htt_kl1_kt1_powheg
- 
  qcd_mu_pt30to50_pythia
  qcd_mu_pt50to80_pythia
  qcd_mu_pt80to120_pythia
