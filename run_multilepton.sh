@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 export MVA_FEATURE_DEBUG=1
-export MVA_ZERO_JETPTRELV2=1
+#export MVA_ZERO_JETPTRELV2=1
 
 task=cf.ReduceEvents
 task=cf.PlotVariables1D
@@ -9,7 +9,7 @@ task=cf.ProvideReducedEvents
 task=cf.GetDatasetLFNs
 task=cf.SelectEvents
 
-version=debugging_mva_manisha2_custom_ver9_mvamodel_v2__test3
+version=debugging_mva_manisha2_custom_ver9_mvamodel_2__test4
 workflow=local  #  choices local, slurm, htcondor
 
 #config=22preEE_v12_central
