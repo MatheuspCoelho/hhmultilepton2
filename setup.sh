@@ -278,6 +278,10 @@ main() {
             cf_color yellow "Keeping current environment active"
             return 0
         fi
+    fi
+    
+    # run the actual setup
+    if setup_multilepton "$@"; then
 
         # Check submodules before setup
 	    bash ./tests/modules_checks.sh
@@ -288,10 +292,7 @@ main() {
 	        cf_color yellow "Please follow the suggested commands above."
 	        return $status
 	    fi
-    fi
  
-    # run the actual setup
-    if setup_multilepton "$@"; then
         multilepton_show_banner
         cf_color green "HH -> Multilepton analysis successfully setup"
         cf_color cyan "Use 'deactivate_multilepton' to exit the virtual environment"
