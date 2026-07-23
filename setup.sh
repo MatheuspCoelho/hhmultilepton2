@@ -278,17 +278,17 @@ main() {
             cf_color yellow "Keeping current environment active"
             return 0
         fi
-    fi
 
-    # Check submodules before setup
-	bash ./tests/modules_checks.sh
-	status=$?
-	
-	if [[ $status -ne 0 ]]; then
-	    cf_color red "Submodule configuration is incorrect."
-	    cf_color yellow "Please follow the suggested commands above."
-	    return $status
-	fi
+        # Check submodules before setup
+	    bash ./tests/modules_checks.sh
+	    status=$?
+	    
+	    if [[ $status -ne 0 ]]; then
+	        cf_color red "Submodule configuration is incorrect."
+	        cf_color yellow "Please follow the suggested commands above."
+	        return $status
+	    fi
+    fi
  
     # run the actual setup
     if setup_multilepton "$@"; then
