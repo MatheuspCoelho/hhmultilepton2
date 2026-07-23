@@ -7,8 +7,8 @@ Wrappers for some default sets of producers.
 from columnflow.production import Producer, producer
 from columnflow.production.normalization import stitched_normalization_weights
 from columnflow.production.categories import category_ids
-from columnflow.production.cms.electron import electron_weights
-from columnflow.production.cms.muon import muon_weights
+# from columnflow.production.cms.electron import electron_weights
+# from columnflow.production.cms.muon import muon_weights
 from columnflow.production.cms.top_pt_weight import top_pt_weight as cf_top_pt_weight
 from columnflow.production.cms.dy import dy_weights
 from columnflow.util import maybe_import
@@ -18,10 +18,10 @@ from multilepton.production.weights import (
     normalized_pu_weight, normalized_pdf_weight, normalized_murmuf_weight, normalized_ps_weights,
 )
 
-from multilepton.production.btag import normalized_btag_weights_deepjet, normalized_btag_weights_pnet
-from multilepton.production.tau import tau_weights
-from multilepton.production.trigger_sf import trigger_weight
-from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3
+# from multilepton.production.btag import normalized_btag_weights_deepjet, normalized_btag_weights_pnet
+# from multilepton.production.tau import tau_weights
+# from multilepton.production.trigger_sf import trigger_weight
+from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS
 
 
 ak = maybe_import("awkward")
