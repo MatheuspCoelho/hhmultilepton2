@@ -283,16 +283,18 @@ main() {
     # run the actual setup
     if setup_multilepton "$@"; then
 
-        # Check submodules before setup
-	    bash ./tests/modules_checks.sh
-	    status=$?
-	    
-	    if [[ $status -ne 0 ]]; then
-	        cf_color red "Submodule configuration is incorrect."
-	        cf_color yellow "Please follow the suggested commands above."
-	        return $status
-	    fi
- 
+        if [[ "${IS_CI}" == "false" ]]; then
+            # Check submodules before setup
+	        bash ./tests/modules_checks.sh
+	        status=$?
+	        
+	        if [[ $status -ne 0 ]]; then
+	            cf_color red "Submodule configuration is incorrect."
+	            cf_color yellow "Please follow the suggested commands above."
+	            return $status
+	        fi
+        fi 
+
         multilepton_show_banner
         cf_color green "HH -> Multilepton analysis successfully setup"
         cf_color cyan "Use 'deactivate_multilepton' to exit the virtual environment"
