@@ -7,19 +7,21 @@ task=cf.ReduceEvents
 task=cf.PlotVariables1D
 task=cf.ProvideReducedEvents
 task=cf.GetDatasetLFNs
+task=cf.CreateYieldTable
 task=cf.SelectEvents
 
-version=debugging_mva_manisha2_custom_ver9_mvamodel_2__test4
+version=debugging_mva_manisha_after_pr21__ext1
 workflow=local  #  choices local, slurm, htcondor
 
+config=22preEE_v14_private
 #config=22preEE_v12_central
 #config=22postEE_v12_central
 #config=23preBPix_v12_central
 #config=23postBPix_v12_central
-config=24_v15_central
+#config=24_v15_central
 
 requested_datasets=(
- hh_ggf_htt_hvv_kl0_kt1_powheg
+ hh_ggf_htt_hvv_kl1_kt1_powheg
 )
 requested_datasets_not_now=(
  hh_ggf_htt_htt_kl1_kt1_powheg
@@ -44,9 +46,11 @@ for dataset in ${requested_datasets[*]}; do
     	--selector default \
         --limit-dataset-files 1 \
         --retries 1 \
+        --workers 1 \
         --clear-logs \
-        --cleanup-jobs \
-        ${1} 
+        --cleanup-jobs ${1} \
+        #--producers default \
+        #--categories c4mu,c3mu1tau,c2mu2tau \
 done
     # --parallel-jobs 300 \
     # --branch 0 \

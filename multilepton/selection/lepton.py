@@ -203,7 +203,7 @@ def get_cone_pt_from_jetidx(
         "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Electron.jetDF"),
         "Jet.{pt,eta,phi}",
         IF_NANO_V12("Electron.mvaTTH", "Jet.btagPNetB"),
-        IF_NANO_V14("Electron.promptMVA"),
+        IF_NANO_V14("Electron.promptMVA", "Jet.btagPNetB"),
         IF_NANO_V15("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.{btagPNetB,btagUParTAK4B}"),
         IF_NANO_V9("Electron.mvaFall17V2{Iso_WP80,Iso_WP90}"),
         IF_NANO_GE_V10("Electron.{mvaIso_WP80,mvaIso_WP90}"),
@@ -337,7 +337,7 @@ def electron_selection(
                 f"[Comparison] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
                 f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
                 f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
-                f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+                f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})"
             )
 
             # ---- event-level yield comparison (nano vs custom) ----
@@ -371,7 +371,7 @@ def electron_selection(
                 f"prompt-e kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
                 f"fake-e kept: nano={fake_keep_nano} custom={fake_keep_custom} "
                 f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
-                f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+                f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)"
             )
     # =========================================
 
@@ -516,7 +516,7 @@ def electron_trigger_matching(
         "Muon.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Muon.jetDF"),
         "Jet.{pt,eta,phi}",
         IF_NANO_V12("Muon.mvaTTH", "Jet.btagPNetB"),
-        IF_NANO_V14("Muon.promptMVA"),
+        IF_NANO_V14("Muon.promptMVA", "Jet.btagPNetB"),
         IF_NANO_V15("Muon.promptMVA", "Jet.{btagPNetB,btagUParTAK4B}"),
     },
     exposed=False,
@@ -639,7 +639,7 @@ def muon_selection(
                     f"[Comparison muon] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
                     f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
                     f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
-                    f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
+                    f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})"
                 )
 
                 # ---- event-level yield comparison (nano vs custom) at matched signal eff ----
@@ -668,7 +668,7 @@ def muon_selection(
                     f"prompt-mu kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
                     f"fake-mu kept: nano={fake_keep_nano} custom={fake_keep_custom} "
                     f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
-                    f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
+                    f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)"
                 )
         # =========================================
 

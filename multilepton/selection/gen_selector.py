@@ -13,7 +13,7 @@ from columnflow.selection import Selector, SelectionResult, selector
 from columnflow.columnar_util import set_ak_column, full_like
 from columnflow.util import maybe_import
 
-from multilepton.util import IF_NANO_V12, IF_NANO_V15
+from multilepton.util import IF_NANO_V12, IF_NANO_V14, IF_NANO_V15
 
 np = maybe_import("numpy")
 ak = maybe_import("awkward")
@@ -78,6 +78,7 @@ def get_btag_info(self: Selector, events: ak.Array):
         "Tau.charge",
         "TauIso",
         IF_NANO_V12("Jet.btagPNetB"),
+        IF_NANO_V14("Jet.btagPNetB"),
         IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
     },
     produces={
