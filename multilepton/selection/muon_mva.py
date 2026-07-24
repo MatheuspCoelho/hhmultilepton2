@@ -4,6 +4,7 @@ Loads pre-trained XGBoost model and applies it to muon events.
 """
 
 import os
+import sys
 import pickle
 from columnflow.util import maybe_import
 
@@ -292,7 +293,6 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
     global _parity_printed
     if os.environ.get("MVA_FEATURE_DEBUG") and not _parity_printed:
         _parity_printed = True
-        import sys
         tr_mean = getattr(scaler, "mean_", None)
         tr_std = getattr(scaler, "scale_", None)
         print(f"[MVA feature parity] muon (n={X.shape[0]}, features_loaded={_features is not None})",

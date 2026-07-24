@@ -271,10 +271,10 @@ def electron_selection(
             logger.warning_once(f"Failed to load custom electron MVA model ({e}), falling back to NanoAOD MVA")
             if "promptMVA" in events.Electron.fields:
                 promptMVA = events.Electron.promptMVA
-                logger.warning_once("Using NanoAOD promptMVA (v14+) as fallback")
+                logger.warning_once("Using NanoAOD promptMVA (v14+) as fallback for electron selection")
             else:
                 promptMVA = events.Electron.mvaTTH
-                logger.warning_once("Using NanoAOD mvaTTH (v<14) as fallback")
+                logger.warning_once("Using NanoAOD mvaTTH (v<14) as fallback for electron selection")
 
     elif electron_mva_source == "nanoaod":
         # Use NanoAOD default MVA based on version
@@ -298,12 +298,11 @@ def electron_selection(
     # scales, so 0.3 is a different working point for each, and the sample here mixes
     # prompt (signal) and fake (background) electrons. A ROC gain only shows up when you
     # (a) separate signal/background via truth and (b) compare at a MATCHED efficiency.
-    debug = True
-    if debug and self.dataset_inst.is_mc and "genPartFlav" in events.Electron.fields:
+    if os.environ.get("MVA_FEATURE_DEBUG") and self.dataset_inst.is_mc and "genPartFlav" in events.Electron.fields:
         try:
             custom = ak.to_numpy(ak.flatten(compute_electron_mva_score(events))).astype(np.float64)
         except Exception as cmp_e:
-            logger.warning_once(f"[Comparison] custom electron MVA failed ({cmp_e})")
+            logger.warning_once(f"[Comparison electron] custom electron MVA failed ({cmp_e})")
             custom = None
 
         # same nanoAOD score the selection actually uses
@@ -334,9 +333,9 @@ def electron_selection(
             bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
 
             logger.info_once(
-                f"[Comparison] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
-                f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
-                f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
+                f"[Comparison electron] gen-matched n_sig={n_sig} n_bkg={n_bkg} | \n"
+                f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | \n"
+                f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} \n"
                 f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
             )
 
@@ -365,12 +364,12 @@ def electron_selection(
             z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
 
             logger.info_once(
-                f"[Yield] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | "
-                f"events(>=1 sel e)/{n_evt}: nano={evt_nano} custom={evt_custom} "
-                f"(delta={evt_custom - evt_nano:+d}) | "
-                f"prompt-e kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
-                f"fake-e kept: nano={fake_keep_nano} custom={fake_keep_custom} "
-                f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
+                f"[Yield electron] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | \n"
+                f"events(>=1 sel e)/{n_evt}: nano={evt_nano} custom={evt_custom} \n"
+                f"(delta={evt_custom - evt_nano:+d}) | \n"
+                f"prompt-e kept: nano={sig_keep_nano} custom={sig_keep_custom} | \n"
+                f"fake-e kept: nano={fake_keep_nano} custom={fake_keep_custom} \n"
+                f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | \n"
                 f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
             )
     # =========================================
@@ -576,21 +575,21 @@ def muon_selection(
                 logger.warning(f"Failed to load custom muon MVA model ({e}), falling back to NanoAOD MVA")
                 if "promptMVA" in events.Muon.fields:
                     promptMVA = events.Muon.promptMVA
-                    logger.info_once("Using NanoAOD promptMVA (v14+) as fallback")
+                    logger.info_once("Using NanoAOD promptMVA (v14+) as fallback for muon selection")
                 else:
                     promptMVA = events.Muon.mvaTTH
-                    logger.info_once("Using NanoAOD mvaTTH (v<14) as fallback")
+                    logger.info_once("Using NanoAOD mvaTTH (v<14) as fallback for muon selection")
 
         elif muon_mva_source == "nanoaod":
             # Use NanoAOD default MVA based on version
             if "promptMVA" in events.Muon.fields:
                 # >= nano v14
                 promptMVA = events.Muon.promptMVA
-                logger.info_once("Using NanoAOD promptMVA (v14+)")
+                logger.info_once("Using NanoAOD promptMVA (v14+) for muon selection")
             else:
                 # nano <v14
                 promptMVA = events.Muon.mvaTTH
-                logger.info_once("Using NanoAOD mvaTTH (v<14)")
+                logger.info_once("Using NanoAOD mvaTTH (v<14) for muon selection")
 
         else:
             raise ValueError(f"Invalid muon_mva_source '{muon_mva_source}'. "
@@ -606,7 +605,7 @@ def muon_selection(
             try:
                 mu_custom = ak.to_numpy(ak.flatten(compute_muon_mva_score(events))).astype(np.float64)
             except Exception as cmp_e:
-                logger.warning_once(f"[Comparison] custom muon MVA failed ({cmp_e})")
+                logger.warning_once(f"[Comparison muon] custom muon MVA failed ({cmp_e})")
                 mu_custom = None
 
             # same nanoAOD score the selection actually uses
@@ -636,9 +635,9 @@ def muon_selection(
                 bkg_eff_custom = float((xc[y == 0] > thr_c).mean())
 
                 logger.info_once(
-                    f"[Comparison muon] gen-matched n_sig={n_sig} n_bkg={n_bkg} | "
-                    f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | "
-                    f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} "
+                    f"[Comparison muon] gen-matched n_sig={n_sig} n_bkg={n_bkg} | \n"
+                    f"AUC custom={auc_c:.4f} nano={auc_n:.4f} | \n"
+                    f"@ matched sig-eff={sig_eff_nano:.3f}: bkg-eff nano={bkg_eff_nano:.4f} \n"
                     f"custom={bkg_eff_custom:.4f} (custom thr={thr_c:.3f})",
                 )
 
@@ -662,12 +661,12 @@ def muon_selection(
                 z_gain = (z_custom / z_nano - 1.0) * 100.0 if np.isfinite(z_nano) and z_nano > 0 else float("nan")
 
                 logger.info_once(
-                    f"[Yield muon] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | "
-                    f"events(>=1 sel mu)/{n_evt}: nano={evt_nano} custom={evt_custom} "
-                    f"(delta={evt_custom - evt_nano:+d}) | "
-                    f"prompt-mu kept: nano={sig_keep_nano} custom={sig_keep_custom} | "
-                    f"fake-mu kept: nano={fake_keep_nano} custom={fake_keep_custom} "
-                    f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | "
+                    f"[Yield muon] nano>{nano_thr:.3f} vs custom>{custom_thr:.3f} (matched sig-eff) | \n"
+                    f"events(>=1 sel mu)/{n_evt}: nano={evt_nano} custom={evt_custom} \n"
+                    f"(delta={evt_custom - evt_nano:+d}) | \n"
+                    f"prompt-mu kept: nano={sig_keep_nano} custom={sig_keep_custom} | \n"
+                    f"fake-mu kept: nano={fake_keep_nano} custom={fake_keep_custom} \n"
+                    f"(fakes removed by custom: {fake_keep_nano - fake_keep_custom:+d}) | \n"
                     f"S/sqrt(B): nano={z_nano:.2f} custom={z_custom:.2f} (gain={z_gain:+.1f}%)",
                 )
         # =========================================
