@@ -576,21 +576,21 @@ def muon_selection(
                 logger.warning(f"Failed to load custom muon MVA model ({e}), falling back to NanoAOD MVA")
                 if "promptMVA" in events.Muon.fields:
                     promptMVA = events.Muon.promptMVA
-                    logger.info("Using NanoAOD promptMVA (v14+) as fallback")
+                    logger.info_once("Using NanoAOD promptMVA (v14+) as fallback")
                 else:
                     promptMVA = events.Muon.mvaTTH
-                    logger.info("Using NanoAOD mvaTTH (v<14) as fallback")
+                    logger.info_once("Using NanoAOD mvaTTH (v<14) as fallback")
 
         elif muon_mva_source == "nanoaod":
             # Use NanoAOD default MVA based on version
             if "promptMVA" in events.Muon.fields:
                 # >= nano v14
                 promptMVA = events.Muon.promptMVA
-                logger.info("Using NanoAOD promptMVA (v14+)")
+                logger.info_once("Using NanoAOD promptMVA (v14+)")
             else:
                 # nano <v14
                 promptMVA = events.Muon.mvaTTH
-                logger.info("Using NanoAOD mvaTTH (v<14)")
+                logger.info_once("Using NanoAOD mvaTTH (v<14)")
 
         else:
             raise ValueError(f"Invalid muon_mva_source '{muon_mva_source}'. "
