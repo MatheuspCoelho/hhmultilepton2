@@ -266,6 +266,7 @@ deactivate_multilepton() {
 }
 
 main() {
+
     if [[ -n "${MULTILEPTON_SETUP+x}" && "${MULTILEPTON_SETUP}" == "true" ]] && ! ${CF_ON_SLURM}; then
         read -p "Multilepton environment is already active. Deactivate first? (y/n): " -n 1 -r
         echo
@@ -281,6 +282,19 @@ main() {
     
     # run the actual setup
     if setup_multilepton "$@"; then
+
+        if [[ "${IS_CI}" == "false" ]]; then
+            # Check submodules before setup
+	        bash ./tests/modules_checks.sh
+	        status=$?
+	        
+	        if [[ $status -ne 0 ]]; then
+	            cf_color red "Submodule configuration is incorrect."
+	            cf_color yellow "Please follow the suggested commands above."
+	            return $status
+	        fi
+        fi 
+
         multilepton_show_banner
         cf_color green "HH -> Multilepton analysis successfully setup"
         cf_color cyan "Use 'deactivate_multilepton' to exit the virtual environment"

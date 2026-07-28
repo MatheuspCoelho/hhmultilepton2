@@ -39,7 +39,9 @@ from multilepton.selection.jet import jet_selection
 from multilepton.production.btag import btag_weights_deepjet, btag_weights_pnet
 from multilepton.production.features import cutflow_features
 from multilepton.production.patches import patch_ecalBadCalibFilter
-from multilepton.util import IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3, IF_RUN_3_NOT_NANO_V15
+from multilepton.util import (
+    IF_DATASET_HAS_LHE_WEIGHTS, IF_RUN_3_NOT_NANO_V15, IF_BTAG_SF_AVAILABLE, IF_RUN_3_BTAG_SF_AVAILABLE,
+)
 
 np = maybe_import("numpy")
 ak = maybe_import("awkward")
@@ -84,15 +86,15 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
     uses={
         process_ids, json_filter, met_filters,
         trigger_selection, lepton_selection, gen_matching_selection, hh_truth_selector, jet_selection,
-        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
+        mc_weight, pu_weight, ps_weights, IF_BTAG_SF_AVAILABLE(btag_weights_deepjet),
         cutflow_features, attach_coffea_behavior, patch_ecalBadCalibFilter,
-        IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3(btag_weights_pnet),
+        IF_RUN_3_NOT_NANO_V15(jet_veto_map), IF_RUN_3_BTAG_SF_AVAILABLE(btag_weights_pnet),
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     produces={
-        process_ids, cutflow_features, IF_RUN_3(btag_weights_pnet),
+        process_ids, cutflow_features, IF_RUN_3_BTAG_SF_AVAILABLE(btag_weights_pnet),
         trigger_selection, lepton_selection, gen_matching_selection, hh_truth_selector, jet_selection,
-        mc_weight, pu_weight, ps_weights, btag_weights_deepjet,
+        mc_weight, pu_weight, ps_weights, IF_BTAG_SF_AVAILABLE(btag_weights_deepjet),
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     exposed=True,
@@ -180,14 +182,16 @@ def default(
         # pileup weights
         events = self[pu_weight](events, **kwargs)
 
-        # btag weights
+        # btag weights (only if shape SFs are available for this config, see
+        # cfg.x.btag_shape_sf_available in configs_multilepton.py)
         btag_weight_jet_mask = ak.fill_none(results.x.jet_mask, False, axis=-1)
-        events = self[btag_weights_deepjet](
-            events,
-            jet_mask=btag_weight_jet_mask,
-            negative_b_score_log_mode="none",
-            **kwargs,
-        )
+        if self.has_dep(btag_weights_deepjet):
+            events = self[btag_weights_deepjet](
+                events,
+                jet_mask=btag_weight_jet_mask,
+                negative_b_score_log_mode="none",
+                **kwargs,
+            )
         if self.has_dep(btag_weights_pnet):
             events = self[btag_weights_pnet](
                 events,
@@ -365,14 +369,16 @@ def empty_call(
         # pileup weights
         events = self[pu_weight](events, **kwargs)
 
-        # btag weights
+        # btag weights (only if shape SFs are available for this config, see
+        # cfg.x.btag_shape_sf_available in configs_multilepton.py)
         btag_weight_jet_mask = abs(events.Jet["eta"]) < 2.5
-        events = self[btag_weights_deepjet](
-            events,
-            jet_mask=btag_weight_jet_mask,
-            negative_b_score_log_mode="none",
-            **kwargs,
-        )
+        if self.has_dep(btag_weights_deepjet):
+            events = self[btag_weights_deepjet](
+                events,
+                jet_mask=btag_weight_jet_mask,
+                negative_b_score_log_mode="none",
+                **kwargs,
+            )
         if self.has_dep(btag_weights_pnet):
             events = self[btag_weights_pnet](
                 events,

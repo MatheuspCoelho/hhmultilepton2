@@ -4,29 +4,37 @@ Loads pre-trained XGBoost model and applies it to muon events.
 """
 
 import os
+import sys
 import pickle
 from columnflow.util import maybe_import
 
 
 # Model paths (relative to this module or absolute)
-_MODEL_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/../data/mva_model"
+_MODEL_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/../data/mva_model/v1"
 _MODEL_PATH = os.path.join(_MODEL_DIR, "mu_xgb_clf.pkl")
 _SCALER_PATH = os.path.join(_MODEL_DIR, "mu_scaler.pkl")
 _FEATURES_PATH = os.path.join(_MODEL_DIR, "mu_features.pkl")
 
-# Default feature list (fallback if loading fails)
+# Default feature list (fallback if loading fails). Order MUST match mu_features.pkl / the
+# trained model's booster feature order.
 _DEFAULT_MUON_FEATURES = [
     "pt", "eta",
     "Irel_neutral", "Irel_charged",
-    "pratio", "ntracks", "btagPNetB",
-    "log_dxy", "log_dz", "sip3d",
-    "segmentComp", "nTrackerLayers",
+    "pfRelIso03_all", "btagDeepFlavB", "jetNDauCharged", "jetPtRelv2",
+    "pratio", "log_dxy", "log_dz", "sip3d",
+    "segmentComp", "isTracker", "isGlobal", "nStations",
 ]
 
 # Singleton cache for model and scaler (loaded once)
 _model = None
 _scaler = None
 _features = None
+
+# names of NanoAOD branches we've already warned about being missing (warn once each)
+_warned_missing_branches = set()
+
+# guard so the MVA_FEATURE_DEBUG parity table prints only once per process
+_parity_printed = False
 
 
 def _load_model():
@@ -115,26 +123,44 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
     mu_dz = _flat(muon.dz)
     mu_sip3d = _flat(muon.sip3d)
 
-    # Handle optional branches - check if they exist and are not None
-    try:
-        mu_iso_all = _flat(muon.miniPFRelIso_all)
-    except (AttributeError, ValueError):
-        mu_iso_all = np.zeros_like(mu_pt)
+    # Optional branches: read coll.<field> or, if the field is absent (most commonly because it
+    # was not declared in the selector's `uses`, so columnflow never loaded it), WARN LOUDLY and
+    # fall back to zeros. A silent zero-fill here previously masked missing inputs and silently
+    # degraded the score, so a missing branch must never be quiet again.
+    def _opt_flat(coll, field):
+        try:
+            return _flat(getattr(coll, field))
+        except (AttributeError, ValueError, KeyError):
+            if field not in _warned_missing_branches:
+                _warned_missing_branches.add(field)
+                import sys
+                print(
+                    f"[compute_muon_mva_score] WARNING: branch '{field}' not available; "
+                    f"feature filled with ZEROS (degrades the MVA). "
+                    f"Declare it in the selector's `uses`.",
+                    file=sys.stderr,
+                )
+            return np.zeros_like(mu_pt)
 
-    try:
-        mu_iso_chg = _flat(muon.miniPFRelIso_chg)
-    except (AttributeError, ValueError):
-        mu_iso_chg = np.zeros_like(mu_pt)
-
-    try:
-        mu_seg = _flat(muon.segmentComp)
-    except (AttributeError, ValueError):
-        mu_seg = np.zeros_like(mu_pt)
-
-    try:
-        mu_nlayers = _flat(muon.nTrackerLayers)
-    except (AttributeError, ValueError):
-        mu_nlayers = np.zeros_like(mu_pt)
+    mu_iso_all = _opt_flat(muon, "miniPFRelIso_all")
+    mu_iso_chg = _opt_flat(muon, "miniPFRelIso_chg")
+    mu_seg = _opt_flat(muon, "segmentComp")
+    mu_nlayers = _opt_flat(muon, "nTrackerLayers")
+    # muon-quality features the model was trained on (bool branches flatten to 0.0/1.0)
+    mu_is_tracker = _opt_flat(muon, "isTracker")
+    mu_n_stations = _opt_flat(muon, "nStations")
+    mu_is_global = _opt_flat(muon, "isGlobal")
+    # v2 model inputs (direct per-muon NanoAOD branches). jetDF is the DeepJet discriminator of
+    # the associated jet stored on the lepton (0 if none); it only exists in 2024 NanoAOD.
+    mu_pfreliso03 = _opt_flat(muon, "pfRelIso03_all")
+    mu_jetndau = _opt_flat(muon, "jetNDauCharged")
+    mu_jetptrelv2 = _opt_flat(muon, "jetPtRelv2")
+    mu_jetdf = _opt_flat(muon, "jetDF")
+    # DIAGNOSTIC (test A): the v2 scaler expects jetPtRelv2 ~ 0 (train std 0.017); feeding the
+    # real ~GeV branch pushes it ~350 sigma out of distribution and collapses the model. Set
+    # MVA_ZERO_JETPTRELV2=1 to feed 0 (== training mean, in-distribution) and see if AUC recovers.
+    if os.environ.get("MVA_ZERO_JETPTRELV2"):
+        mu_jetptrelv2 = np.zeros_like(mu_pt)
 
     # -------------------------------------------------------------------------
     # Jet matching: fill None in jetIdx BEFORE any boolean operations.
@@ -178,17 +204,23 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
     # Get matched jet properties
     matched_jpt = _gather_jet(jet.pt)
 
-    try:
-        bpnet_branch = jet.btagPNetB
-    except (AttributeError, ValueError):
-        bpnet_branch = None
-    matched_bpnet = _gather_jet(bpnet_branch)
+    def _opt_jet_branch(field):
+        try:
+            return getattr(jet, field)
+        except (AttributeError, ValueError, KeyError):
+            if field not in _warned_missing_branches:
+                _warned_missing_branches.add(field)
+                import sys
+                print(
+                    f"[compute_muon_mva_score] WARNING: jet branch '{field}' not available; "
+                    f"matched-jet feature filled with ZEROS (degrades the MVA). "
+                    f"Declare 'Jet.{field}' in the selector's `uses`.",
+                    file=sys.stderr,
+                )
+            return None
 
-    try:
-        ncon_branch = jet.nConstituents
-    except (AttributeError, ValueError):
-        ncon_branch = None
-    matched_ncon = _gather_jet(ncon_branch)
+    matched_bpnet = _gather_jet(_opt_jet_branch("btagPNetB"))
+    matched_ncon = _gather_jet(_opt_jet_branch("nConstituents"))
 
     # Flatten valid mask to 1D numpy bool
     valid_flat = ak.to_numpy(ak.flatten(valid_ak)).astype(bool)
@@ -213,7 +245,9 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
     btagPNetB = np.where(valid_flat, matched_bpnet, 0.0).astype(np.float32)
     ntracks = np.where(valid_flat, matched_ncon, 0.0).astype(np.float32)
 
-    # Build feature dictionary with all computed features
+    # Build feature dictionary with all computed features. feat_order (from the loaded
+    # *_features.pkl) selects which of these the current model actually consumes, so leaving
+    # extra (e.g. v1-only) keys here is harmless.
     computed = {
         "pt": mu_pt,
         "eta": mu_eta,
@@ -227,6 +261,14 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
         "sip3d": mu_sip3d,
         "segmentComp": mu_seg,
         "nTrackerLayers": mu_nlayers,
+        "isTracker": mu_is_tracker,
+        "nStations": mu_n_stations,
+        "isGlobal": mu_is_global,
+        # v2 inputs
+        "pfRelIso03_all": mu_pfreliso03,
+        "btagDeepFlavB": mu_jetdf,  # nano per-lepton jetDF (DeepJet disc of associated jet)
+        "jetNDauCharged": mu_jetndau,
+        "jetPtRelv2": mu_jetptrelv2,
     }
 
     # Build feature matrix in correct order
@@ -242,6 +284,30 @@ def compute_muon_mva_score(events) -> "ak.Array":  # noqa: F821
             X_list.append(np.zeros_like(mu_pt))
 
     X = np.column_stack(X_list).astype(np.float32)
+
+    # ------------------------------------------------------------------
+    # Optional feature-parity diagnostic (see compute_electron_mva_score for details).
+    # Compares the in-situ feature distribution against the training distribution stored in
+    # the scaler (StandardScaler.mean_/scale_). Enable with:  MVA_FEATURE_DEBUG=1
+    # ------------------------------------------------------------------
+    global _parity_printed
+    if os.environ.get("MVA_FEATURE_DEBUG") and not _parity_printed:
+        _parity_printed = True
+        tr_mean = getattr(scaler, "mean_", None)
+        tr_std = getattr(scaler, "scale_", None)
+        print(f"[MVA feature parity] muon (n={X.shape[0]}, features_loaded={_features is not None})",
+              file=sys.stderr)
+        print("  %-16s %12s %12s | %12s %12s | %7s"
+              % ("feature", "insitu_mean", "insitu_std", "train_mean", "train_std", "pull"),
+              file=sys.stderr)
+        for i, feat in enumerate(feat_order):
+            im, isd = float(np.mean(X[:, i])), float(np.std(X[:, i]))
+            tm = float(tr_mean[i]) if tr_mean is not None else float("nan")
+            ts = float(tr_std[i]) if tr_std is not None else float("nan")
+            pull = (im - tm) / ts if ts else float("nan")
+            flag = "  <== OFF" if (ts and abs(pull) > 0.5) else ""
+            print("  %-16s %12.5f %12.5f | %12.5f %12.5f | %7.2f%s"
+                  % (feat, im, isd, tm, ts, pull, flag), file=sys.stderr)
 
     # Apply scaler (trained on same features)
     X_scaled = scaler.transform(X)

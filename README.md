@@ -161,6 +161,7 @@ law run cf.PlotVariables1D \
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/tolange"><img src="https://avatars.githubusercontent.com/u/11850680?s=96&v=4" width="100px;" alt="`Torben Lange`"/><br /><sub><b>Torben Lange</b></sub></a><br /><a href="https://github.com/HEP-KBFI/hhmultilepton2/commits/master/?author=tolange" title="Code">💻</a> </td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/MatheuspCoelho"><img src="https://avatars.githubusercontent.com/u/85200761?v=4" width="100px;" alt="`Matheus Coelho`"/><br /><sub><b>Matheus Coelho</b></sub></a><br /><a href="https://github.com/HEP-KBFI/hhmultilepton2/commits/master/?author=MatheuspCoelho" title="Code">💻</a> </td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/kjaffel"><img src="https://avatars.githubusercontent.com/u/47111455?s=400&v=4" width="100px;" alt="`Khawla Jaffel`"/><br /><sub><b>Khawla Jaffel</b></sub></a><br /><a href="https://github.com/HEP-KBFI/hhmultilepton2/commits/master/?author=kjaffel" title="Code">💻</a> </td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/manisharana3112"><img src="https://avatars.githubusercontent.com/u/165633092?v=4" width="100px;" alt="`Manisha Rana`"/><br /><sub><b>Manisha Rana</b></sub></a><br /><a href="https://github.com/HEP-KBFI/hhmultilepton2/commits/master/?author=manisharana3112" title="Code">💻</a> </td>
     </tr>
   </tbody>
 </table>

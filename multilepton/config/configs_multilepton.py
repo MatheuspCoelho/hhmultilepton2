@@ -533,6 +533,13 @@ def add_config(
             },
         })
 
+        # As of the 2025-09-24 cvmfs sync, JME POG's combined jet_jerc.json.gz for
+        # 2024_Summer24 only ships JEC corrections; no PtResolution/ScaleFactor (JER) entries
+        # exist for any 2024 campaign name yet, so JER smearing can't be evaluated for 2024.
+        # Flip this back on once the POG publishes 2024 JER, see
+        # https://cms-jerc.web.cern.ch/Recommendations/#2024
+        cfg.x.jer_available = year != 2024
+
         cfg.x.jet_id = JetIdConfig(
             corrections={
                 "AK4PUPPI_Tight": 2,
@@ -950,17 +957,23 @@ def add_config(
     # =============================================
     # b-tag working points
     # =============================================
-    cfg.x.btag_sf_deepjet = BTagSFConfig(
-        correction_set="deepJet_shape",
-        jec_sources=cfg.x.btag_sf_jec_sources,
-        discriminator="btagDeepFlavB",
-    )
-    if run == 3:
-        cfg.x.btag_sf_pnet = BTagSFConfig(
-            correction_set="particleNet_shape",
+    # As of the 2025-09-24 cvmfs sync, the BTV POG json for 2024_Summer24 only exposes
+    # UParTAK4_wp_values (working-point thresholds); no deepJet_shape/particleNet_shape/
+    # UParTAK4_shape corrections exist yet, so b-tag shape SF reweighting can't run for 2024.
+    # Flip this back on once the POG publishes 2024 shape corrections.
+    cfg.x.btag_shape_sf_available = year != 2024
+    if cfg.x.btag_shape_sf_available:
+        cfg.x.btag_sf_deepjet = BTagSFConfig(
+            correction_set="deepJet_shape",
             jec_sources=cfg.x.btag_sf_jec_sources,
-            discriminator="btagPNetB",
+            discriminator="btagDeepFlavB",
         )
+        if run == 3:
+            cfg.x.btag_sf_pnet = BTagSFConfig(
+                correction_set="particleNet_shape",
+                jec_sources=cfg.x.btag_sf_jec_sources,
+                discriminator="btagPNetB",
+            )
         # add upart
         # cfg.x.btag_sf_upartak4 = BTagSFConfig(
         # correction_set="UParTAK4_shape",
