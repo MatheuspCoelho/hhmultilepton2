@@ -1244,7 +1244,7 @@ def lepton_selection(
 
         elif ch_key in {"ce2mutau"}:
             if self.dataset_inst.is_mc:
-                trig_ids = (tids.single_e + tids.single_mu + tids.double_mu + 
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_mu +
                             tids.double_emu + tids.triple_emumu + tids.cross_e_tau + tids.cross_mu_tau)
             elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu
@@ -1303,7 +1303,7 @@ def lepton_selection(
         elif ch_key in {"cemu2tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
-                            tids.cross_e_tau +tids.cross_mu_tau + tids.cross_tau_tau_any)
+                            tids.cross_e_tau + tids.cross_mu_tau + tids.cross_tau_tau_any)
             elif data_stream == "muoneg":
                 trig_ids = tids.double_emu
             elif data_stream == "e":
@@ -1330,7 +1330,7 @@ def lepton_selection(
         elif ch_key in {"cemuSS1tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
-                            tids.cross_e_tau +tids.cross_mu_tau)
+                            tids.cross_e_tau + tids.cross_mu_tau)
             elif data_stream == "muoneg":
                 trig_ids = tids.double_emu
             elif data_stream == "e":
