@@ -204,7 +204,7 @@ def get_cone_pt_from_jetidx(
         "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Electron.jetDF"),
         "Jet.{pt,eta,phi}",
         IF_NANO_V12("Electron.mvaTTH", "Jet.btagPNetB"),
-        IF_NANO_V14("Electron.promptMVA", "Jet.btagPNetB"),
+        IF_NANO_V14("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.btagPNetB"),
         IF_NANO_V15("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.{btagPNetB,btagUParTAK4B}"),
         IF_NANO_V9("Electron.mvaFall17V2{Iso_WP80,Iso_WP90}"),
         IF_NANO_GE_V10("Electron.{mvaIso_WP80,mvaIso_WP90}"),
@@ -248,7 +248,7 @@ def electron_selection(
         # check this in original root files if necessary
         mva_iso_wp80 = events.Electron.mvaIso_WP80
         mva_iso_wp90 = events.Electron.mvaIso_WP90
-        if self.config_inst.campaign.x.version == 15:
+        if self.config_inst.campaign.x.version >= 14:
             mva_iso_wphzz = events.Electron.mvaIso_WPHZZ
     else:
         # <= nano v9
@@ -387,7 +387,7 @@ def electron_selection(
         btag_values_bad = 0 * events.Electron.pt[bad_indicies]
         btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
         btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
-        if self.config_inst.campaign.x.version == 15:
+        if self.config_inst.campaign.x.version >= 14:
             atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1) | (mva_iso_wphzz == 1))
         else:
             atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
@@ -1127,12 +1127,14 @@ def lepton_selection(
         ("fam", "mu_match_any"): mu_match_any,
     })
 
+    data_stream = self.dataset_inst.name.split("_")[1] if self.dataset_inst.is_data else None
+
     # ────────────────────────────────────────────────────────────────
     # 2 SECOND LOOP – evaluate every physics channel once
     # ────────────────────────────────────────────────────────────────
     for ch_key, spec in channels.items():
 
-        # eormu -> set trig_ids to any particular trigger, so that eormu does not run over all triggers
+        # eormu : set trig_ids to any particular trigger, so that eormu does not run over all triggers
         if ch_key in {"ceormu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e
@@ -1140,15 +1142,27 @@ def lepton_selection(
                 continue
 
         # 3l0th + 3l1th + 4l: single, double, and triple lepton triggers
-        elif ch_key in {"c3e", "c4e", "c3etau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("ee"):
+        elif ch_key in {"c3e", "c4e"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
                 trig_ids = tids.single_e + tids.double_e + tids.triple_e
             else:
                 continue
 
-        elif ch_key in {"c3mu", "c4mu", "c3mutau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("mumu"):
+        elif ch_key in {"c3etau"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e + tids.cross_e_tau
+            else:
+                continue
+
+        elif ch_key in {"c3mu", "c4mu"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
                 trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu
+            else:
+                continue
+
+        elif ch_key in {"c3mutau"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -1156,16 +1170,12 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_e + tids.double_mu +
                             tids.double_emu + tids.triple_eemu + tids.triple_emumu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e
             else:
                 continue
 
@@ -1173,13 +1183,11 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_e +
                             tids.double_emu + tids.triple_e + tids.triple_eemu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e + tids.triple_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
             else:
                 continue
@@ -1188,67 +1196,147 @@ def lepton_selection(
             if self.dataset_inst.is_mc:
                 trig_ids = (tids.single_e + tids.single_mu + tids.double_mu +
                             tids.double_emu + tids.triple_mu + tids.triple_emumu)
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu + tids.triple_mu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
             else:
                 continue
 
-        elif ch_key in {"c2emu", "c2emutau"}:
+        elif ch_key in {"c2emu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_e + tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_eemu
-            elif self.dataset_inst.has_tag("ee"):
-                trig_ids = tids.double_e
-            elif self.dataset_inst.has_tag("emu_from_e"):
-                trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
             else:
                 continue
 
-        elif ch_key in {"ce2mu", "ce2mutau"}:
+        elif ch_key in {"c2emutau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_e +
+                            tids.double_emu + tids.triple_eemu + tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_eemu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        elif ch_key in {"ce2mu"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_mu + tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu + tids.triple_emumu
-            elif self.dataset_inst.has_tag("mumu"):
-                trig_ids = tids.double_mu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
-                trig_ids = tids.single_mu
             else:
                 continue
 
-        # 2l2th + 2l0or1tau: single, double mixed lepton triggers
-        elif ch_key in {"c2e2tau", "c2eSS1tau", "c2eSS"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("ee"):
+        elif ch_key in {"ce2mutau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_mu + 
+                            tids.double_emu + tids.triple_emumu + tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_emumu
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            else:
+                continue
+
+        # 2l0or1tau + 2l2th: single, double mixed lepton triggers
+        elif ch_key in {"c2eSS"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
                 trig_ids = tids.single_e + tids.double_e
             else:
                 continue
 
-        elif ch_key in {"c2mu2tau", "c2muSS1tau", "c2muSS"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("mumu"):
+        elif ch_key in {"c2eSS1tau"}:
+            if self.dataset_inst.is_mc or data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            else:
+                continue
+
+        elif ch_key in {"c2e2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau + tids.cross_tau_tau_any
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"c2muSS"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
                 trig_ids = tids.single_mu + tids.double_mu
             else:
                 continue
 
-        elif ch_key in {"cemu2tau", "cemuSS1tau", "cemuSS"}:
+        elif ch_key in {"c2muSS1tau"}:
+            if self.dataset_inst.is_mc or data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        elif ch_key in {"c2mu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cemu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
+                            tids.cross_e_tau +tids.cross_mu_tau + tids.cross_tau_tau_any)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cemuSS"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.single_mu + tids.double_emu
-            elif self.dataset_inst.has_tag("mue"):
+            elif data_stream == "muoneg":
                 trig_ids = tids.double_emu
-            elif self.dataset_inst.has_tag("emu_from_e"):
+            elif data_stream == "e":
                 trig_ids = tids.single_e
-            elif self.dataset_inst.has_tag("emu_from_mu"):
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu
+            else:
+                continue
+
+        elif ch_key in {"cemuSS1tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu + tids.double_emu +
+                            tids.cross_e_tau +tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -1256,9 +1344,9 @@ def lepton_selection(
         elif ch_key in {"ce3tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_e + tids.cross_e_tau + tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("tautau"):
+            elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("etau"):
+            elif data_stream == "e":
                 trig_ids = tids.single_e + tids.cross_e_tau
             else:
                 continue
@@ -1266,16 +1354,36 @@ def lepton_selection(
         elif ch_key in {"cmu3tau"}:
             if self.dataset_inst.is_mc:
                 trig_ids = tids.single_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("tautau"):
+            elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
-            elif self.dataset_inst.has_tag("mutau"):
+            elif data_stream == "mu":
                 trig_ids = tids.single_mu + tids.cross_mu_tau
             else:
                 continue
 
         # 1l2th, 4tauh
-        elif ch_key in {"c4tau", "ce2tau", "cmu2tau"}:
-            if self.dataset_inst.is_mc or self.dataset_inst.has_tag("tautau"):
+        elif ch_key in {"c4tau"}:
+            if self.dataset_inst.is_mc or data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"ce2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_e + tids.cross_e_tau + tids.cross_tau_tau_any
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.cross_e_tau
+            elif data_stream == "tau":
+                trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        elif ch_key in {"cmu2tau"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.cross_mu_tau + tids.cross_tau_tau_any
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.cross_mu_tau
+            elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
             else:
                 continue
