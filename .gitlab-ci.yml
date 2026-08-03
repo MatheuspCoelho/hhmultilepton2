@@ -3,13 +3,13 @@ stages:
   - test
 
 variables:
-  GIT_SUBMODULE_STRATEGY: recursive
-  GIT_SUBMODULE_DEPTH: 20   # optional, keeps submodule fetch shallow to match GIT_DEPTH
+  GIT_SUBMODULE_STRATEGY: none
 
 lint:
   stage: lint
   image: python:3.9
   script:
+    - git submodule update --init --recursive modules/columnflow
     - source setup.sh ""
     - ./tests/run_linting
   tags:
