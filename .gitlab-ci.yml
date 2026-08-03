@@ -17,6 +17,7 @@ lint:
 
 analysis:
   stage: test
+  script:
     - git submodule update --init --recursive modules/columnflow
     # Pre-seed .setups/dev.sh so columnflow's interactive setup (cf_setup_interactive)
     # takes its "already configured" fast path instead of re-querying every variable.
