@@ -11,6 +11,15 @@ action() {
     local workflow="local"
     local failed=()
 
+    # law.cfg references several $CF_* variables that setup.sh never defaults
+    # in CI (they're only set in the gitignored .setups/*.sh, e.g. copied from
+    # .setups/template.sh on a dev machine). Without them, law fails to parse
+    # the unexpanded literal strings as their expected types (bytes/bool/duration).
+    export CF_WLCG_CACHE_MAX_SIZE="${CF_WLCG_CACHE_MAX_SIZE:-15GB}"
+    export CF_WLCG_CACHE_GLOBAL_LOCK="${CF_WLCG_CACHE_GLOBAL_LOCK:-true}"
+    export CF_SLURM_RUNTIME="${CF_SLURM_RUNTIME:-3h}"
+    export CF_CRAB_SANDBOX_NAME="${CF_CRAB_SANDBOX_NAME:-CMSSW_14_2_1::arch=el9_amd64_gcc21}"
+
     # In CI, setup.sh skips law's post-install step (which normally builds the
     # task index), so "law run cf.<Task>" can't resolve short task names yet.
     # Build/refresh the index here, scoped to this script only.
