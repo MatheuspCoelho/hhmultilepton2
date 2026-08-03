@@ -17,8 +17,35 @@ lint:
 
 analysis:
   stage: test
-  script:
     - git submodule update --init --recursive modules/columnflow
+    # Pre-seed .setups/dev.sh so columnflow's interactive setup (cf_setup_interactive)
+    # takes its "already configured" fast path instead of re-querying every variable.
+    # Without this, in CI (no TTY) it silently resets CF_INTERACTIVE_VENV_FILE to its
+    # own empty default, so venv_multilepton.sh (with correctionlib/pandas/etc. via
+    # columnar.txt) never gets sourced and only the bare cf_dev lint venv is active,
+    # causing "ModuleNotFoundError: No module named 'correctionlib'" at runtime.
+    - mkdir -p .setups
+    - |
+      cat > .setups/dev.sh << 'EOF'
+      export CF_CERN_USER="ci"
+      export CF_DATA="$CF_REPO_BASE/data"
+      export CF_SOFTWARE_BASE="$CF_DATA/software"
+      export CF_JOB_BASE="$CF_DATA/jobs"
+      export CF_STORE_NAME="cf_store"
+      export CF_STORE_LOCAL="$CF_DATA/$CF_STORE_NAME"
+      export CF_WLCG_CACHE_ROOT=""
+      export CF_WLCG_CACHE_MAX_SIZE="15GB"
+      export CF_WLCG_CACHE_GLOBAL_LOCK="true"
+      export CF_VENV_SETUP_MODE_UPDATE="false"
+      export CF_INTERACTIVE_VENV_FILE="$MULTILEPTON_BASE/sandboxes/venv_multilepton.sh"
+      export CF_LOCAL_SCHEDULER="true"
+      export CF_FLAVOR="cms"
+      export LAW_CMS_VO="cms"
+      export CF_CRAB_STORAGE_ELEMENT=""
+      export CF_CRAB_BASE_DIRECTORY="/store/user/$CF_CERN_USER/cf_crab_outputs"
+      export CF_CRAB_SANDBOX_NAME="CMSSW_14_2_1::arch=el9_amd64_gcc21"
+      export CF_SLURM_RUNTIME="3h"
+      EOF
     - source setup.sh dev
     - bash tests/run_analysis
   tags:
