@@ -7,7 +7,7 @@ variables:
 
 lint:
   stage: lint
-  image: python:3.9
+  #image: python:3.9
   script:
     - git submodule update --init --recursive modules/columnflow
     - source setup.sh ""
