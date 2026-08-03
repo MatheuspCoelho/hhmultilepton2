@@ -11,6 +11,12 @@ action() {
     local workflow="local"
     local failed=()
 
+    # In CI, setup.sh skips law's post-install step (which normally builds the
+    # task index), so "law run cf.<Task>" can't resolve short task names yet.
+    # Build/refresh the index here, scoped to this script only.
+    echo "Indexing law tasks..."
+    law index -q || return "$?"
+
     # Each entry: "config:dataset"
     local tests=(
         "22preEE_v12_central:data_mu_d"
