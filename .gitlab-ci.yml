@@ -3,7 +3,8 @@ stages:
   - test
 
 variables:
-  GIT_SUBMODULE_STRATEGY: none
+  GIT_SUBMODULE_STRATEGY: recursive
+  GIT_SUBMODULE_DEPTH: 20   # optional, keeps submodule fetch shallow to match GIT_DEPTH
 
 lint:
   stage: lint
