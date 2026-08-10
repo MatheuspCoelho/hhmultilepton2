@@ -40,6 +40,13 @@ action() {
         "24_v15_central:ttzz_madgraph"
     )
 
+    # When called with explicit config/dataset args (e.g. from a GitLab CI matrix job,
+    # one job per dataset), run only that single test instead of the full list below.
+    # Plain `bash tests/run_analysis` with no args still runs everything, as before.
+    if [ -n "${1:-}" ] && [ -n "${2:-}" ]; then
+        tests=("${1}:${2}")
+    fi
+
     for entry in "${tests[@]}"; do
         local config="${entry%%:*}"
         local dataset="${entry##*:}"
