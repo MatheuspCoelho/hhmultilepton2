@@ -90,6 +90,10 @@ analysis:
       export CF_CRAB_SANDBOX_NAME="CMSSW_14_2_1::arch=el9_amd64_gcc21"
       export CF_SLURM_RUNTIME="3h"
       export WLCG_FILE_SYSTEM="wlcg_fs_cernbox"
+      # law_ci.cfg overrides [outputs].base_fs to write task outputs to
+      # local_fs_ci_store instead of real EOS/grid storage - see law_ci.cfg and
+      # law.cfg's [local_fs_ci_store] section for details.
+      export LAW_CONFIG_FILE="$MULTILEPTON_BASE/law_ci.cfg"
       EOF
     - source setup.sh dev
     - bash tests/run_analysis "${CONFIG}" "${DATASET}"
