@@ -562,6 +562,29 @@ def add_config(
         cfg.x.get_dataset_lfns = None
         cfg.x.get_dataset_lfns_sandbox = None
 
+        # CI smoke tests (tests/run_analysis): use a single local fixture file instead of
+        # querying DAS via dasgoclient, so the pipeline doesn't need CVMFS/scram or a grid
+        # proxy. Opt-in only via MULTILEPTON_CI_TEST, set solely by .gitlab-ci.yml, so local
+        # and production runs are never affected. The fixture content is irrelevant here -
+        # this only needs to make GetDatasetLFNs (and downstream tasks) resolve and run, not
+        # validate physics content.
+        if os.getenv("MULTILEPTON_CI_TEST", "false").lower() == "true":
+            def get_ci_fixture_lfns(dataset_inst: od.Dataset, shift_inst: od.Shift, dataset_key: str) -> list[str]:
+                # one fixture per (config, dataset) pair - NOT shared across eras/datasets:
+                # different configs use different JEC/JER/correction files, trigger names,
+                # and NanoAOD schemas (e.g. v12 vs v15), so a single generic file could
+                # silently skip era-specific code paths or fail on schema mismatches.
+                # Uploaded to the Package Registry as "<config>__<dataset>.root" via
+                # tests/upload_ci_fixture.sh, downloaded per-job by .gitlab-ci.yml (each
+                # matrix job only needs its own CONFIG/DATASET fixture).
+                fname = f"{cfg.name}__{dataset_inst.name}.root"
+                return [f"/{fname}"]
+
+            cfg.x.get_dataset_lfns = get_ci_fixture_lfns
+            cfg.x.get_dataset_lfns_sandbox = law.NO_STR
+            cfg.x.get_dataset_lfns_remote_fs = lambda dataset_inst: ["local_fs_ci"]
+            return cfg
+
         # Handle special campaign type: "custom" with "creator" == "uhh"
         campaign_custom = cfg.campaign.x("custom", {})
         if campaign_custom.get("creator") != "uhh":
