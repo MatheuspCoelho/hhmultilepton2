@@ -32,7 +32,7 @@ from columnflow.types import Iterable
 import multilepton.production.processes as process_producers
 
 from multilepton.selection.trigger import trigger_selection
-from multilepton.selection.lepton import lepton_selection
+from multilepton.selection.lepton import lepton_selection, lepton_selection_ffmr
 from multilepton.selection.gen_selector import gen_matching_selection
 from multilepton.selection.gen_hh_selector import hh_truth_selector
 from multilepton.selection.jet import jet_selection
@@ -98,6 +98,8 @@ def get_bad_events(self: Selector, events: ak.Array) -> ak.Array:
         IF_DATASET_HAS_LHE_WEIGHTS(pdf_weights, murmuf_weights),
     },
     exposed=True,
+    # lepton selector to use, replaced by default_ffmr below
+    lepton_sel=lepton_selection,
 )
 def default(
     self: Selector,
@@ -148,7 +150,7 @@ def default(
         results += hh_results
 
     # lepton selection
-    events, lepton_results = self[lepton_selection](events, trigger_results, **kwargs)
+    events, lepton_results = self[self.lepton_sel](events, trigger_results, **kwargs)
     results += lepton_results
 
     # gen-matching selection (match selected leptons to generator level) - DEPENDENT on lepton_selection
@@ -246,6 +248,12 @@ def default(
 
 @default.init
 def default_init(self: Selector, **kwargs) -> None:
+    # exchange the lepton selector if a different one was set
+    if self.lepton_sel is not lepton_selection:
+        for deps in (self.uses, self.produces):
+            deps.discard(lepton_selection)
+            deps.add(self.lepton_sel)
+
     # build and store derived process id producers
     for tag in ("dy", "w_lnu"):
         prod_name = f"process_ids_{tag}"
@@ -297,6 +305,10 @@ def default_setup(self: Selector, task: law.Task, **kwargs) -> None:
             },
         ),
     ]
+
+
+# same as default, but selecting the fake factor measurement regions instead of the physics channels
+default_ffmr = default.derive("default_ffmr", cls_dict={"lepton_sel": lepton_selection_ffmr})
 
 
 empty = default.derive("empty", cls_dict={})

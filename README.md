@@ -140,6 +140,9 @@ law run cf.PlotVariables1D \
     --workflow crab \      # to be tested!?
 ```
 
+A ready-made lxplus -> CERN HTCondor profile writing to T2_BR_SPRACE is in
+`.setups/condor_T2BR.sh`; source it with `source setup.sh condor_T2BR`.
+
 ## Documentation
 
 - Lives here: https://gitlab.cern.ch/hh-multileptons-full-analysis/hh-multileptons-doc

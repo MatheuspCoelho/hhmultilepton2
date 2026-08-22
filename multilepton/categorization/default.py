@@ -33,7 +33,7 @@ def get_btag_info(self: Categorizer, events: ak.Array):
     return wp_loose, wp_medium, wp_tight, btag_score
 
 
-# columns read by get_global_lepton_veto, used also in the "uses" in the SR and SB categorizers
+# columns read by get_global_lepton_veto, added to the uses of every SR and SB categorizer
 GLOBAL_VETO_COLUMNS = {
     "ElectronLoose.{pt,eta,phi,mass,charge}",
     "MuonLoose.{pt,eta,phi,mass,charge}",
@@ -45,12 +45,9 @@ M_LL_VETO = 12.0
 
 def get_global_lepton_veto(self: Categorizer, events: ak.Array) -> ak.Array:
     """
-    Both vetoes are built from the loose electron and muon collections, taus are not considered, and
-    both are driven by same-flavour opposite-sign (SFOS) pairs:
-      1. events contaning four leptons that split into two SFOS pairs whose four-lepton invariant
-         mass is below M_4L_VETO are vetoed. all 2-pair combinations are considered, so the veto also
-         reaches events with more than four loose leptons,
-      2. events with any single SFOS pair below M_LL_VETO are vetoed.
+    Vetoes, from the loose electrons and muons only (no taus):
+      1. four leptons forming two same-flavour opposite-sign (SFOS) pairs with m_4l < M_4L_VETO,
+      2. any SFOS pair with m_ll < M_LL_VETO.
     """
     ele = attach_behavior(events.ElectronLoose, "Electron")
     mu = attach_behavior(events.MuonLoose, "Muon")
@@ -68,8 +65,7 @@ def get_global_lepton_veto(self: Categorizer, events: ak.Array) -> ak.Array:
     lep_idx = ak.local_index(lep_charge, axis=1)
     is_sfos = lambda a, b: (lep_is_mu[a] == lep_is_mu[b]) & ((lep_charge[a] + lep_charge[b]) == 0)
 
-    # veto 1: any four leptons that split into two SFOS pairs and have a low four-lepton mass. four
-    # objects can be paired up in three ways, and the quadruplet counts if any of them works out
+    # veto 1, testing the three ways of pairing up four leptons
     i0, i1, i2, i3 = ak.unzip(ak.combinations(lep_idx, 4, axis=1))
     two_sfos = (
         (is_sfos(i0, i1) & is_sfos(i2, i3)) |
@@ -79,7 +75,7 @@ def get_global_lepton_veto(self: Categorizer, events: ak.Array) -> ak.Array:
     m_4l = (lep_p4[i0] + lep_p4[i1] + lep_p4[i2] + lep_p4[i3]).mass
     veto_m_4l = ak.any(two_sfos & (m_4l < M_4L_VETO), axis=1)
 
-    # veto 2: any single SFOS pair with a low invariant mass
+    # veto 2
     j0, j1 = ak.unzip(ak.combinations(lep_idx, 2, axis=1))
     m_ll = (lep_p4[j0] + lep_p4[j1]).mass
     veto_m_ll = ak.any(is_sfos(j0, j1) & (m_ll < M_LL_VETO), axis=1)
@@ -257,6 +253,40 @@ def cat_e2tau(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, 
 @categorizer(uses={"channel_id"})
 def cat_mu2tau(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     return events, events.channel_id == self.config_inst.channels.n.cmu2tau.id
+
+
+# fake factor measurement regions, only filled by the default_ffmr selector.
+# no global lepton veto on the WZ and DY regions, its SFOS cuts would remove what they measure.
+@categorizer(uses={"channel_id", *GLOBAL_VETO_COLUMNS})
+def cat_ttbarMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    # no b-veto, the region has its own b-tag requirements in the selection
+    catmask = events.channel_id == self.config_inst.channels.n.cttbarMR.id
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & global_veto)
+
+
+@categorizer(uses={"channel_id",
+    IF_NANO_V12("Jet.btagPNetB"),
+    IF_NANO_V14("Jet.btagPNetB"),
+    IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}")})
+def cat_wzMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    catmask = events.channel_id == self.config_inst.channels.n.cwzMR.id
+    wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
+    tagged_tight = btag_score > wp_tight
+    bveto = (ak.sum(tagged_tight, axis=1) < 1)
+    return events, (catmask & bveto)
+
+
+@categorizer(uses={"channel_id",
+    IF_NANO_V12("Jet.btagPNetB"),
+    IF_NANO_V14("Jet.btagPNetB"),
+    IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}")})
+def cat_dyMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    catmask = events.channel_id == self.config_inst.channels.n.cdyMR.id
+    wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
+    tagged_tight = btag_score > wp_tight
+    bveto = (ak.sum(tagged_tight, axis=1) < 1)
+    return events, (catmask & bveto)
 
 
 @categorizer(uses={"channel_id",

@@ -140,6 +140,53 @@ setup_multilepton() {
         cf_setup_interactive "${CF_SETUP_NAME}" "${MULTILEPTON_BASE}/.setups/${CF_SETUP_NAME}.sh" || return "$?"
     fi
 
+    # decreasing the timeout limit so that the task dont get stuck for no reason
+    export XRD_REQUESTTIMEOUT="${XRD_REQUESTTIMEOUT:-120}"
+    export XRD_STREAMTIMEOUT="${XRD_STREAMTIMEOUT:-60}"
+    export XRD_CONNECTIONWINDOW="${XRD_CONNECTIONWINDOW:-30}"
+    export XRD_CONNECTIONRETRY="${XRD_CONNECTIONRETRY:-2}"
+    export XRD_TIMEOUTRESOLUTION="${XRD_TIMEOUTRESOLUTION:-5}"
+
+    # XrdCl fork handlers can deadlock the next fork() after a task read over xrootd, which hangs
+    # the run between two tasks. disabling them is safe as every fork here is a fork+exec.
+    # NOTE: only valid with a single luigi worker, revisit if --workers is ever raised above 1
+    export XRD_RUNFORKHANDLER="${XRD_RUNFORKHANDLER:-0}"
+
+    # gating the specific condor-sprace setup changes under the corresponding setup.sh
+    cf_export_bool MULTILEPTON_CONDOR_SPRACE
+
+    # law.cfg variables that only .setups/*.sh exports, which remote jobs never source. they have
+    # to be set here, before "law run" parses law.cfg. all ":-" guarded, so forwarded values win
+    if ${CF_REMOTE_ENV}; then
+        export CF_WLCG_CACHE_MAX_SIZE="${CF_WLCG_CACHE_MAX_SIZE:-15GB}"
+        export CF_WLCG_CACHE_GLOBAL_LOCK="${CF_WLCG_CACHE_GLOBAL_LOCK:-true}"
+        export CF_SLURM_RUNTIME="${CF_SLURM_RUNTIME:-6h}"
+        export CF_CRAB_STORAGE_ELEMENT="${CF_CRAB_STORAGE_ELEMENT:-T2_CH_CERN}"
+        export CF_CRAB_SANDBOX_NAME="${CF_CRAB_SANDBOX_NAME:-CMSSW_14_2_1::arch=el9_amd64_gcc21}"
+        export CF_JOB_BASE="${CF_JOB_BASE:-${LAW_JOB_HOME:-${TMPDIR:-/tmp}}/cf_jobs}"
+        # where the job writes its outputs. if empty, law silently falls back to manivald
+        export WLCG_FILE_SYSTEM="${WLCG_FILE_SYSTEM:-wlcg_fs_cernbox}"
+    fi
+
+    # output file system for law.cfg's "[outputs] base_fs". a .setups/*.sh may point it at a local
+    # mount, but remote jobs have no such mount and always go through the wlcg file system
+    if ${CF_REMOTE_ENV}; then
+        export CF_OUTPUT_BASE_FS="wlcg, ${WLCG_FILE_SYSTEM}"
+    else
+        export CF_OUTPUT_BASE_FS="${CF_OUTPUT_BASE_FS:-wlcg, ${WLCG_FILE_SYSTEM}}"
+    fi
+
+    # remaining law.cfg knobs a .setups/*.sh may override, defaults reproduce law's own behaviour
+    # order in which GetDatasetLFNs looks for nano files
+    export MULTILEPTON_LFN_SOURCES="${MULTILEPTON_LFN_SOURCES:-wlcg_fs_infn_redirector, wlcg_fs_global_redirector, wlcg_fs_desy_store}"
+    # retries for every wlcg file system, law's own defaults are 1 and 5s
+    export MULTILEPTON_WLCG_RETRIES="${MULTILEPTON_WLCG_RETRIES:-1}"
+    export MULTILEPTON_WLCG_RETRY_DELAY="${MULTILEPTON_WLCG_RETRY_DELAY:-5s}"
+    # extra "[resources]" entries, empty means columnflow drops the key
+    export MULTILEPTON_RES_CALIBRATE="${MULTILEPTON_RES_CALIBRATE:-}"
+    export MULTILEPTON_RES_SELECT="${MULTILEPTON_RES_SELECT:-}"
+    export MULTILEPTON_RES_PRODUCE="${MULTILEPTON_RES_PRODUCE:-}"
+
     # continue the fixed setup
     export CF_CONDA_BASE="${CF_CONDA_BASE:-${CF_SOFTWARE_BASE}/conda}"
     export CF_VENV_BASE="${CF_VENV_BASE:-${CF_SOFTWARE_BASE}/venvs}"
@@ -283,9 +330,10 @@ main() {
     # run the actual setup
     if setup_multilepton "$@"; then
 
-        if [[ "${IS_CI}" == "false" ]]; then
+        # skip it for remote jobs
+        if ! ${CF_REMOTE_ENV:-false} && [[ "${IS_CI:-false}" == "false" ]]; then
             # Check submodules before setup
-	        bash ./tests/modules_checks.sh
+	        bash "${MULTILEPTON_BASE}/tests/modules_checks.sh"
 	        status=$?
 	        
 	        if [[ $status -ne 0 ]]; then
