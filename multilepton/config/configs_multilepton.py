@@ -1197,8 +1197,13 @@ def add_config(
         add_external("met_phi_corr", (localizePOGSF(getfromera, "JME", f"{metPOGJsonFile}"), "v1"))
     add_external("tau_sf", (localizePOGSF(getfromera, "TAU", f"{tauPOGJsonFile}"), "v1"))
     add_external("pu_sf", (localizePOGSF(getfromera, "LUM", "puWeights.json.gz"), "v1"))
+    # making the trigger SF files readable when running condor jobs
+    trigger_sf_base = os.environ.get(
+        "MULTILEPTON_TRIGGER_SF_BASE",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "TriggerScaleFactors"),
+    )
     add_external("trigger_sf", Ext(
-        f"{os.path.dirname(os.path.abspath(__file__))}/../data/TriggerScaleFactors/{getfromera}",
+        os.path.join(trigger_sf_base, getfromera),
         subpaths=DotDict(
             muon="temporary_MuHlt_abseta_pt.json.gz",
             cross_muon="CrossMuTauHlt.json.gz",

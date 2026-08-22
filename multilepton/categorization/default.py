@@ -5,6 +5,7 @@ HH -> multi-leptons selection methods.
 """
 
 from columnflow.categorization import Categorizer, categorizer
+from columnflow.columnar_util import attach_behavior
 from columnflow.util import maybe_import
 
 from multilepton.util import IF_NANO_V12, IF_NANO_V14, IF_NANO_V15
@@ -30,6 +31,56 @@ def get_btag_info(self: Categorizer, events: ak.Array):
     btag_score = events.Jet[btag_discriminator]
 
     return wp_loose, wp_medium, wp_tight, btag_score
+
+
+# columns read by get_global_lepton_veto, added to the uses of every SR and SB categorizer
+GLOBAL_VETO_COLUMNS = {
+    "ElectronLoose.{pt,eta,phi,mass,charge}",
+    "MuonLoose.{pt,eta,phi,mass,charge}",
+}
+
+M_4L_VETO = 140.0
+M_LL_VETO = 12.0
+
+
+def get_global_lepton_veto(self: Categorizer, events: ak.Array) -> ak.Array:
+    """
+    Vetoes, from the loose electrons and muons only (no taus):
+      1. four leptons forming two same-flavour opposite-sign (SFOS) pairs with m_4l < M_4L_VETO,
+      2. any SFOS pair with m_ll < M_LL_VETO.
+    """
+    ele = attach_behavior(events.ElectronLoose, "Electron")
+    mu = attach_behavior(events.MuonLoose, "Muon")
+
+    lep_p4 = ak.concatenate([ele * 1, mu * 1], axis=1)
+    lep_charge = ak.concatenate([ele.charge, mu.charge], axis=1)
+    lep_is_mu = ak.concatenate(
+        [
+            ak.zeros_like(ele.charge, dtype=bool),
+            ak.ones_like(mu.charge, dtype=bool),
+        ],
+        axis=1,
+    )
+
+    lep_idx = ak.local_index(lep_charge, axis=1)
+    is_sfos = lambda a, b: (lep_is_mu[a] == lep_is_mu[b]) & ((lep_charge[a] + lep_charge[b]) == 0)
+
+    # veto 1, testing the three ways of pairing up four leptons
+    i0, i1, i2, i3 = ak.unzip(ak.combinations(lep_idx, 4, axis=1))
+    two_sfos = (
+        (is_sfos(i0, i1) & is_sfos(i2, i3)) |
+        (is_sfos(i0, i2) & is_sfos(i1, i3)) |
+        (is_sfos(i0, i3) & is_sfos(i1, i2))
+    )
+    m_4l = (lep_p4[i0] + lep_p4[i1] + lep_p4[i2] + lep_p4[i3]).mass
+    veto_m_4l = ak.any(two_sfos & (m_4l < M_4L_VETO), axis=1)
+
+    # veto 2
+    j0, j1 = ak.unzip(ak.combinations(lep_idx, 2, axis=1))
+    m_ll = (lep_p4[j0] + lep_p4[j1]).mass
+    veto_m_ll = ak.any(is_sfos(j0, j1) & (m_ll < M_LL_VETO), axis=1)
+
+    return ~veto_m_4l & ~veto_m_ll
 
 
 @categorizer(uses={"event"})
@@ -204,11 +255,45 @@ def cat_mu2tau(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array,
     return events, events.channel_id == self.config_inst.channels.n.cmu2tau.id
 
 
+# fake factor measurement regions, only filled by the default_ffmr selector.
+# no global lepton veto on the WZ and DY regions, its SFOS cuts would remove what they measure.
+@categorizer(uses={"channel_id", *GLOBAL_VETO_COLUMNS})
+def cat_ttbarMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    # no b-veto, the region has its own b-tag requirements in the selection
+    catmask = events.channel_id == self.config_inst.channels.n.cttbarMR.id
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & global_veto)
+
+
+@categorizer(uses={"channel_id",
+    IF_NANO_V12("Jet.btagPNetB"),
+    IF_NANO_V14("Jet.btagPNetB"),
+    IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}")})
+def cat_wzMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    catmask = events.channel_id == self.config_inst.channels.n.cwzMR.id
+    wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
+    tagged_tight = btag_score > wp_tight
+    bveto = (ak.sum(tagged_tight, axis=1) < 1)
+    return events, (catmask & bveto)
+
+
+@categorizer(uses={"channel_id",
+    IF_NANO_V12("Jet.btagPNetB"),
+    IF_NANO_V14("Jet.btagPNetB"),
+    IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}")})
+def cat_dyMR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    catmask = events.channel_id == self.config_inst.channels.n.cdyMR.id
+    wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
+    tagged_tight = btag_score > wp_tight
+    bveto = (ak.sum(tagged_tight, axis=1) < 1)
+    return events, (catmask & bveto)
+
+
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lSS1tauOS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS1tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS1tau.id)
@@ -218,14 +303,15 @@ def cat_2lSS1tauOS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lOS1tauSS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS1tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS1tau.id)
@@ -235,14 +321,15 @@ def cat_2lOS1tauSS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     WS = events.leptons_os == 0  # WS = Wrong Sign
-    return events, (catmask & bveto & SR & WS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & WS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lSS1tauOS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS1tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS1tau.id)
@@ -252,14 +339,15 @@ def cat_2lSS1tauOS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 0
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lOS1tauSS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS1tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS1tau.id)
@@ -269,14 +357,15 @@ def cat_2lOS1tauSS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 0
     WS = events.leptons_os == 0  # WS = Wrong Sign
-    return events, (catmask & bveto & SR & WS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & WS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lSS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS.id)
@@ -286,14 +375,15 @@ def cat_2lSS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     SS = events.leptons_os == 0
-    return events, (catmask & bveto & SR & SS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & SS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lOS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS.id)
@@ -303,14 +393,15 @@ def cat_2lOS_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lSS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS.id)
@@ -320,14 +411,15 @@ def cat_2lSS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 0
     SS = events.leptons_os == 0
-    return events, (catmask & bveto & SR & SS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & SS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2lOS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2eSS.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemuSS.id)
@@ -337,14 +429,15 @@ def cat_2lOS_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 0
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_1l2tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.ce2tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cmu2tau.id)
@@ -353,14 +446,15 @@ def cat_1l2tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_1l2tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.ce2tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cmu2tau.id)
@@ -369,7 +463,8 @@ def cat_1l2tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 0
     OS = events.leptons_os == 1
-    return events, (catmask & bveto & SR & OS)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & OS & global_veto)
 
 
 # 3l/4l inclusive, later split into CR / SR via Z-peak
@@ -377,7 +472,7 @@ def cat_1l2tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_3l0tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c3e.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c3mu.id)
@@ -388,14 +483,15 @@ def cat_3l0tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_3l0tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c3e.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c3mu.id)
@@ -406,14 +502,15 @@ def cat_3l0tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_4l_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c4e.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c3emu.id)
@@ -425,14 +522,15 @@ def cat_4l_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, 
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_4l_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c4e.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c3emu.id)
@@ -444,13 +542,14 @@ def cat_4l_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, 
     bveto = (ak.sum(tagged_medium, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"), IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_3l1tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c3etau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c2emutau.id)
@@ -461,14 +560,15 @@ def cat_3l1tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_3l1tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c3etau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.c2emutau.id)
@@ -479,14 +579,15 @@ def cat_3l1tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2l2tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2e2tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemu2tau.id)
@@ -496,14 +597,15 @@ def cat_2l2tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_2l2tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c2e2tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cemu2tau.id)
@@ -513,14 +615,15 @@ def cat_2l2tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_1l3tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.ce3tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cmu3tau.id)
@@ -529,14 +632,15 @@ def cat_1l3tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os"})
+    "tight_sel", "Electron.charge", "Muon.charge", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_1l3tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.ce3tau.id
     catmask = catmask | (events.channel_id == self.config_inst.channels.n.cmu3tau.id)
@@ -545,14 +649,15 @@ def cat_1l3tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arr
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Tau.charge", "leptons_os"})
+    "tight_sel", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_4tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c4tau.id
     wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
@@ -560,14 +665,15 @@ def cat_4tau_SR(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SR = events.tight_sel == 1
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SR & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SR & chargeok & global_veto)
 
 
 @categorizer(uses={"channel_id",
     IF_NANO_V12("Jet.btagPNetB"),
     IF_NANO_V14("Jet.btagPNetB"),
     IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
-    "tight_sel", "Tau.charge", "leptons_os"})
+    "tight_sel", "Tau.charge", "leptons_os", *GLOBAL_VETO_COLUMNS})
 def cat_4tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     catmask = events.channel_id == self.config_inst.channels.n.c4tau.id
     wp_loose, wp_medium, wp_tight, btag_score = get_btag_info(self, events)
@@ -575,7 +681,8 @@ def cat_4tau_SB(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array
     bveto = (ak.sum(tagged_tight, axis=1) < 1)
     SB = events.tight_sel == 0
     chargeok = events.leptons_os == 1
-    return events, (catmask & bveto & SB & chargeok)
+    global_veto = get_global_lepton_veto(self, events)
+    return events, (catmask & bveto & SB & chargeok & global_veto)
 
 
 # bveto
