@@ -192,6 +192,43 @@ def get_cone_pt_from_jetidx(
     return cone_pt
 
 
+def hzz_iso_wp(electron, cuts=None):
+    """
+    Rebuilds Electron_mvaIso_WPHZZ from Electron_mvaHZZIso, for nano versions that contains the
+    score but not the WP flag (e.g. v12).
+    """
+    # mvaEleID-Winter22-HZZ-V1 working point, from cms-sw/cmssw
+    # RecoEgamma/ElectronIdentification/python/Identification/mvaElectronID_Winter22_HZZ_V1_cff.py
+    # nano stores tanh(raw) in Electron_mvaHZZIso (see MVAValueMapProducer.h in CMSSW)
+    if cuts is None:
+        cuts = np.tanh([
+            1.633973689084034,    # EB1, 5 < pt < 10
+            1.5499076306249353,   # EB2, 5 < pt < 10
+            2.0629564440753247,   # EE,  5 < pt < 10
+            0.3685228146685872,   # EB1, pt >= 10
+            0.2662407818935475,   # EB2, pt >= 10
+            -0.5444837363886459,  # EE,  pt >= 10
+        ])
+
+    # nano stores deltaEtaSC = superCluster().eta() - eta(), so superCluster().eta()
+    abs_sc_eta = abs(electron.eta + electron.deltaEtaSC)
+
+    categories = [
+        (electron.pt < 10) & (abs_sc_eta < 0.800),
+        (electron.pt < 10) & (abs_sc_eta >= 0.800) & (abs_sc_eta < 1.479),
+        (electron.pt < 10) & (abs_sc_eta >= 1.479),
+        (electron.pt >= 10) & (abs_sc_eta < 0.800),
+        (electron.pt >= 10) & (abs_sc_eta >= 0.800) & (abs_sc_eta < 1.479),
+        (electron.pt >= 10) & (abs_sc_eta >= 1.479),
+    ]
+
+    passed = ak.zeros_like(electron.pt, dtype=bool)
+    for category, cut in zip(categories, cuts):
+        passed = passed | (category & (electron.mvaHZZIso > cut))
+
+    return passed
+
+
 @selector(
     uses={
         "Electron.{pt,eta,phi,dxy,dz}",
@@ -203,7 +240,7 @@ def get_cone_pt_from_jetidx(
         # v2 model inputs (jetDF = per-lepton DeepJet disc of associated jet, only exists in 2024)
         "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Electron.jetDF"),
         "Jet.{pt,eta,phi}",
-        IF_NANO_V12("Electron.mvaTTH", "Jet.btagPNetB"),
+        IF_NANO_V12("Electron.{mvaTTH,mvaHZZIso}", "Jet.btagPNetB"),
         IF_NANO_V14("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.btagPNetB"),
         IF_NANO_V15("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.{btagPNetB,btagUParTAK4B}"),
         IF_NANO_V9("Electron.mvaFall17V2{Iso_WP80,Iso_WP90}"),
@@ -248,12 +285,18 @@ def electron_selection(
         # check this in original root files if necessary
         mva_iso_wp80 = events.Electron.mvaIso_WP80
         mva_iso_wp90 = events.Electron.mvaIso_WP90
-        if self.config_inst.campaign.x.version >= 14:
+        if "mvaIso_WPHZZ" in events.Electron.fields:
             mva_iso_wphzz = events.Electron.mvaIso_WPHZZ
+        elif "mvaHZZIso" in events.Electron.fields:
+            # v12 carry the score but not the WPHZZ flag, so we apply the WP by hand
+            mva_iso_wphzz = hzz_iso_wp(events.Electron)
+        else:
+            mva_iso_wphzz = None
     else:
         # <= nano v9
         mva_iso_wp80 = events.Electron.mvaFall17V2Iso_WP80
         mva_iso_wp90 = events.Electron.mvaFall17V2Iso_WP90
+        mva_iso_wphzz = None
 
     # Get electron MVA source from config (default: "custom")
     # Options:
@@ -387,10 +430,9 @@ def electron_selection(
         btag_values_bad = 0 * events.Electron.pt[bad_indicies]
         btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
         btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
-        if self.config_inst.campaign.x.version >= 14:
-            atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1) | (mva_iso_wphzz == 1))
-        else:
-            atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
+        atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
+        if mva_iso_wphzz is not None:
+            atleast_loose = atleast_loose | (mva_iso_wphzz == 1)
         tight_mask = (
             (events.Electron.pt > 10) &
             (abs(events.Electron.eta) < 2.5) &
@@ -928,6 +970,11 @@ def tau_trigger_matching(
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
         tau_selection, tau_trigger_matching,
         "event", "{Electron,Muon,Tau}.{charge,mass}",
+        # jets are needed for the ttbarMR region
+        "Jet.{pt,eta,phi,jetId}",
+        IF_NANO_V12("Jet.btagPNetB"),
+        IF_NANO_V14("Jet.btagPNetB"),
+        IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
     },
     produces={
         electron_selection, electron_trigger_matching, muon_selection, muon_trigger_matching,
@@ -942,6 +989,9 @@ def tau_trigger_matching(
         "MuonLoose", "MuonTight", "Muon.cone_pt", "Muon.muonLeptoMVA_hh",
         "ElectronLoose", "ElectronTight", "Electron.cone_pt",
     },
+    # when True, evaluate the measurement regions instead of the physics channels
+    ffmr=False,
+    mr_channels={"cttbarMR", "cwzMR", "cdyMR"},
 )
 def lepton_selection(
     self: Selector,
@@ -1133,6 +1183,11 @@ def lepton_selection(
     # 2 SECOND LOOP – evaluate every physics channel once
     # ────────────────────────────────────────────────────────────────
     for ch_key, spec in channels.items():
+
+        # the measurement regions overlap several physics channels, so the two cannot run in the
+        # same pass, they would collide in channel_id and in the leptons_os / tight_sel columns
+        if (ch_key in self.mr_channels) != self.ffmr:
+            continue
 
         # eormu : set trig_ids to any particular trigger, so that eormu does not run over all triggers
         if ch_key in {"ceormu"}:
@@ -1385,6 +1440,46 @@ def lepton_selection(
                 trig_ids = tids.single_mu + tids.cross_mu_tau
             elif data_stream == "tau":
                 trig_ids = tids.cross_tau_tau_any
+            else:
+                continue
+
+        # ttbar measurement region
+        elif ch_key in {"cttbarMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu +
+                            tids.double_e + tids.double_mu + tids.double_emu +
+                            tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        # WZ measurement region
+        elif ch_key in {"cwzMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = (tids.single_e + tids.single_mu +
+                            tids.double_e + tids.double_mu + tids.double_emu +
+                            tids.triple_e + tids.triple_mu + tids.triple_eemu + tids.triple_emumu +
+                            tids.cross_e_tau + tids.cross_mu_tau)
+            elif data_stream == "muoneg":
+                trig_ids = tids.double_emu + tids.triple_eemu + tids.triple_emumu
+            elif data_stream == "e":
+                trig_ids = tids.single_e + tids.double_e + tids.triple_e + tids.cross_e_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.triple_mu + tids.cross_mu_tau
+            else:
+                continue
+
+        # Drell-Yan + jets measurement region
+        elif ch_key in {"cdyMR"}:
+            if self.dataset_inst.is_mc:
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
+            elif data_stream == "mu":
+                trig_ids = tids.single_mu + tids.double_mu + tids.cross_mu_tau
             else:
                 continue
 
@@ -2597,6 +2692,335 @@ def lepton_selection(
                 ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
                 matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
 
+            elif ch_key == "cttbarMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+
+                if self.config_inst.campaign.x.year in {2024, 2025, 2026}:
+                    mr_btag_tagger = "UParTAK4"
+                    mr_btag_discriminator = "btagUParTAK4B"
+                else:
+                    mr_btag_tagger = "particleNet"
+                    mr_btag_discriminator = "btagPNetB"
+                mr_btagcut_tight = self.config_inst.x.btag_working_points[mr_btag_tagger]["tight"]
+                mr_btagcut_medium = self.config_inst.x.btag_working_points[mr_btag_tagger]["medium"]
+                mr_btagcut_loose = self.config_inst.x.btag_working_points[mr_btag_tagger]["loose"]
+
+                mr_jet_mask = (
+                    (events.Jet.pt > 20.0) &
+                    (abs(events.Jet.eta) < 2.5)
+                )
+                mr_jet_mask = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Electron[e_ctrl]) > 0.5, axis=2,
+                )
+                mr_jet_mask = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Muon[mu_ctrl]) > 0.5, axis=2,
+                )
+                mr_jet_notau = mr_jet_mask & ak.all(
+                    events.Jet.metric_table(events.Tau[noid_tau_mask]) > 0.5, axis=2,
+                )
+                mr_jet_btag = events.Jet[mr_btag_discriminator]
+                mr_jet_ok = (
+                    (ak.sum(mr_jet_mask, axis=1) >= 2) &
+                    (ak.sum(mr_jet_notau & (mr_jet_btag > mr_btagcut_medium), axis=1) >= 1) &
+                    (ak.sum(mr_jet_mask & (mr_jet_btag > mr_btagcut_loose), axis=1) >= 2) &
+                    (ak.sum(mr_jet_notau & (mr_jet_btag > mr_btagcut_tight), axis=1) < 1)
+                )
+
+                mr_n_e = ak.sum(e_mask, axis=1)
+                mr_n_mu = ak.sum(mu_mask, axis=1)
+                mr_es = ak.pad_none(events.Electron[e_mask], 2, axis=1)
+                mr_mus = ak.pad_none(events.Muon[mu_mask], 2, axis=1)
+
+                mr_mll = ak.where(
+                    mr_n_e == 2,
+                    (mr_es[:, 0] * 1 + mr_es[:, 1] * 1).mass,
+                    ak.where(
+                        mr_n_mu == 2,
+                        (mr_mus[:, 0] * 1 + mr_mus[:, 1] * 1).mass,
+                        (mr_es[:, 0] * 1 + mr_mus[:, 0] * 1).mass,
+                    ),
+                )
+                mr_mll = ak.fill_none(mr_mll, 0.0)
+
+                mr_charge_prod = ak.where(
+                    mr_n_e == 2,
+                    mr_es[:, 0].charge * mr_es[:, 1].charge,
+                    ak.where(
+                        mr_n_mu == 2,
+                        mr_mus[:, 0].charge * mr_mus[:, 1].charge,
+                        mr_es[:, 0].charge * mr_mus[:, 0].charge,
+                    ),
+                )
+                mr_os_ok = ak.fill_none(mr_charge_prod < 0, False)
+                mr_same_flavour = (mr_n_e == 2) | (mr_n_mu == 2)
+
+                base_ok = (
+                    (mr_n_e + mr_n_mu == 2) &
+                    (ak.sum(e_veto, axis=1) + ak.sum(mu_veto, axis=1) == 2) &
+                    mr_os_ok &
+                    (mr_mll > 12.0) &
+                    (~mr_same_flavour | (np.abs(mr_mll - mr_z_mass) > mr_z_window)) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    mr_jet_ok
+                )
+
+                mr_total_charge = (
+                    ak.sum(events.Electron.charge[e_ctrl], axis=1) +
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (ak.sum(ch_tau_mask, axis=1) != 2) | (np.abs(mr_total_charge) != 0)
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
+                sel_looseelectron_mask = sel_looseelectron_mask | (ok & e_veto)
+                sel_tightelectron_mask = sel_tightelectron_mask | (ok & e_mask)
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                chargeok = mr_os_ok
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                tight_ok = ok & (ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1)
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+                elif tid in tids.double_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 2)
+                elif tid in tids.double_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 2)
+                elif tid in tids.double_emu:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+                elif tid in tids.cross_e_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    )
+                elif tid in tids.cross_mu_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+                matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
+
+            elif ch_key == "cwzMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+
+                def mr_has_z_pair(objs):
+                    pairs = ak.combinations(objs, 2, axis=1, fields=["l1", "l2"])
+                    os_pairs = (pairs.l1.charge * pairs.l2.charge) < 0
+                    masses = (pairs.l1 * 1 + pairs.l2 * 1).mass
+                    return ak.any(os_pairs & (abs(masses - mr_z_mass) < mr_z_window), axis=1)
+
+                mr_z_from_e = mr_has_z_pair(events.Electron[e_mask])
+                mr_z_from_mu = mr_has_z_pair(events.Muon[mu_mask])
+
+                e_charge = events.Electron.charge[e_mask]
+                mu_charge = events.Muon.charge[mu_mask]
+                # tau_charge = events.Tau.charge[ch_tau_mask]
+
+                # for the 3 same-flavour leptons, the Z pair is the OS one closest to mZ
+                charge_3mu = mr_z_from_mu & (np.abs(ak.sum(mu_charge, axis=1)) == 1)
+                charge_3e = mr_z_from_e & (np.abs(ak.sum(e_charge, axis=1)) == 1)
+                charge_2mue = mr_z_from_mu & (ak.sum(mu_charge, axis=1) == 0)
+                charge_mu2e = mr_z_from_e & (ak.sum(e_charge, axis=1) == 0)
+
+                base_ok_3mu = (
+                    (ak.sum(e_veto, axis=1) == 0) &
+                    (ak.sum(mu_ctrl, axis=1) == 3) &
+                    (ak.sum(mu_veto, axis=1) == 3) &
+                    (ak.sum(mu_mask, axis=1) == 3) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_3mu
+                )
+                base_ok_2mue = (
+                    (ak.sum(e_ctrl, axis=1) == 1) &
+                    (ak.sum(e_veto, axis=1) == 1) &
+                    (ak.sum(e_mask, axis=1) == 1) &
+                    (ak.sum(mu_ctrl, axis=1) == 2) &
+                    (ak.sum(mu_veto, axis=1) == 2) &
+                    (ak.sum(mu_mask, axis=1) == 2) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_2mue
+                )
+                base_ok_mu2e = (
+                    (ak.sum(e_ctrl, axis=1) == 2) &
+                    (ak.sum(e_veto, axis=1) == 2) &
+                    (ak.sum(e_mask, axis=1) == 2) &
+                    (ak.sum(mu_ctrl, axis=1) == 1) &
+                    (ak.sum(mu_veto, axis=1) == 1) &
+                    (ak.sum(mu_mask, axis=1) == 1) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_mu2e
+                )
+                base_ok_3e = (
+                    (ak.sum(mu_veto, axis=1) == 0) &
+                    (ak.sum(e_ctrl, axis=1) == 3) &
+                    (ak.sum(e_veto, axis=1) == 3) &
+                    (ak.sum(e_mask, axis=1) == 3) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    charge_3e
+                )
+                base_ok = base_ok_3mu | base_ok_2mue | base_ok_mu2e | base_ok_3e
+
+                # we can use the charge criteria to ensure orthogonality with the 3l1th SR
+                mr_all_iso = (
+                    ak.sum(ch_tau_mask & tau_iso_mask, axis=1) == ak.sum(ch_tau_mask, axis=1)
+                )
+                mr_total_charge = (
+                    ak.sum(events.Electron.charge[e_ctrl], axis=1) +
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (ak.sum(ch_tau_mask, axis=1) != 1) | ~mr_all_iso |
+                    (np.abs(mr_total_charge) != 0)
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_electron_mask = sel_electron_mask | (ok & e_ctrl)
+                sel_looseelectron_mask = sel_looseelectron_mask | (ok & e_veto)
+                sel_tightelectron_mask = sel_tightelectron_mask | (ok & e_mask)
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                chargeok = charge_3mu | charge_2mue | charge_mu2e | charge_3e
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                # ch_tau_mask = ch_tau_mask & (events.Tau[get_tau_tagger("e")] >= wp_config.tau_vs_e.vloose)
+                tight_ok = ok & ((ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1))
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_e:
+                    trig_match_ok = trig_match_ok & (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+                elif tid in tids.cross_e_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(e_match & e_ctrl, axis=1) >= 1)
+                    )
+                    if_mu_fired = base_ok & mu_trig_any & (ak.sum(mu_match_any & mu_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(mu_trig_any, trig_match_ok & if_mu_fired, trig_match_ok)
+                elif tid in tids.cross_mu_tau:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(tau_match & ch_tau_mask, axis=1) >= 1) &
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+                    if_e_fired = base_ok & e_trig_any & (ak.sum(e_match_any & e_ctrl, axis=1) >= 1)
+                    trig_match_ok = ak.where(e_trig_any, trig_match_ok & if_e_fired, trig_match_ok)
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+                matched_trigger_ids.append(ak.singletons(ak.nan_to_none(ids)))
+
+            elif ch_key == "cdyMR":
+
+                mr_z_mass = 91.18
+                mr_z_window = 10.0
+                mr_mus = ak.pad_none(events.Muon[mu_mask], 2, axis=1)
+                mr_mumu_mass = (mr_mus[:, 0] * 1 + mr_mus[:, 1] * 1).mass
+                mr_z_ok = ak.fill_none(abs(mr_mumu_mass - mr_z_mass) < mr_z_window, False)
+
+                base_ok = (
+                    (ak.sum(mu_ctrl, axis=1) == 2) &
+                    (ak.sum(mu_veto, axis=1) == 2) &
+                    (ak.sum(mu_mask, axis=1) == 2) &
+                    (ak.sum(e_veto, axis=1) == 0) &
+                    (ak.sum(ch_tau_mask, axis=1) >= 1) &
+                    mr_z_ok
+                )
+
+                # we can use the charge criteria to ensure orthogonality with the 2lSS1th
+                # and 2l2th SRs
+                mr_all_iso = (
+                    ak.sum(ch_tau_mask & tau_iso_mask, axis=1) == ak.sum(ch_tau_mask, axis=1)
+                )
+                mr_total_charge = (
+                    ak.sum(events.Muon.charge[mu_ctrl], axis=1) +
+                    ak.sum(events.Tau.charge[ch_tau_mask], axis=1)
+                )
+                base_ok = base_ok & (
+                    (np.abs(ak.sum(events.Muon.charge[mu_ctrl], axis=1)) == 0) &
+                    ((ak.sum(ch_tau_mask, axis=1) != 2) | ~mr_all_iso |
+                        (np.abs(mr_total_charge) != 0))
+                )
+
+                if not disable_triggers:
+                    base_ok = base_ok & fired
+
+                ok = ak.where(base_ok, ok, False)
+
+                sel_muon_mask = sel_muon_mask | (ok & mu_ctrl)
+                sel_loosemuon_mask = sel_loosemuon_mask | (ok & mu_veto)
+                sel_tightmuon_mask = sel_tightmuon_mask | (ok & mu_mask)
+                sel_tau_mask = sel_tau_mask | (ok & ch_tau_mask)
+                sel_isotau_mask = sel_isotau_mask | (ok & (ch_tau_mask & tau_iso_mask))
+
+                mu_charge = events.Muon.charge[mu_mask]
+                # tau_charge = events.Tau.charge[ch_tau_mask]
+                chargeok = (np.abs((ak.sum(mu_charge, axis=1))) == 0)
+                leptons_os = ak.where(ok, chargeok, leptons_os)
+
+                tight_ok = ok & (ak.sum((ch_tau_mask & tau_iso_mask), axis=1) >= 1)
+                tight_sel = tight_sel | tight_ok
+
+                trig_match_ok = base_ok
+                if tid in tids.single_mu:
+                    trig_match_ok = trig_match_ok & mu_only_emutau & (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                elif tid in tids.double_mu:
+                    trig_match_ok = trig_match_ok & (
+                        (ak.sum(mu_match & mu_ctrl, axis=1) >= 1)
+                    )
+
+                trig_match = trig_match | trig_match_ok
+
+                single_triggered = ak.where(trig_match_ok, True, single_triggered)
+                ids = ak.where(trig_match_ok, np.float32(tid), np.float32(np.nan))
+
         # accumulate over triggers
             good_evt = ak.where(ok, True, good_evt)
 
@@ -2725,3 +3149,8 @@ def lepton_selection(
 def lepton_selection_init(self: Selector, **kwargs) -> None:
     # add column to load the raw tau tagger score
     self.uses.add(f"Tau.raw{self.config_inst.x.tau_tagger}VSjet")
+
+
+# fills the measurement regions instead of the physics channels, used by the default_ffmr selector.
+# the two never run together, so all output columns keep their usual names
+lepton_selection_ffmr = lepton_selection.derive("lepton_selection_ffmr", cls_dict={"ffmr": True})

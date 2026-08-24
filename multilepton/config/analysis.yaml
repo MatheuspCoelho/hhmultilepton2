@@ -439,10 +439,20 @@ channels:
   ce2tau: 
     id: 39
     label: "$e\\tau_{h}\\tau_{h}$"
-  cmu2tau: 
+  cmu2tau:
     id: 40
     label: "$\\mu\\tau_{h}\\tau_{h}$"
-  ceormu: 
+  # fake factor measurement regions, only filled by the ffmr selector
+  cttbarMR:
+    id: 41
+    label: "$t\\bar{t}$ MR"
+  cwzMR:
+    id: 42
+    label: "$WZ$ MR"
+  cdyMR:
+    id: 43
+    label: "$DY$ MR"
+  ceormu:
     id: 10000
     label: "$e or \\mu$"
     tags: "ceormu"
