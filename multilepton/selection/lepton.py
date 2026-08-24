@@ -20,7 +20,7 @@ from columnflow.columnar_util import (
 from columnflow.util import maybe_import
 
 from multilepton.util import (
-    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_RUN_3_2024,
+    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_NOT_NANO_V15, IF_RUN_3_2024,
 )
 from multilepton.selection.muon_mva import compute_muon_mva_score
 from multilepton.selection.electron_mva import compute_electron_mva_score
@@ -971,7 +971,8 @@ def tau_trigger_matching(
         tau_selection, tau_trigger_matching,
         "event", "{Electron,Muon,Tau}.{charge,mass}",
         # jets are needed for the ttbarMR region
-        "Jet.{pt,eta,phi,jetId}",
+        "Jet.{pt,eta,phi}",
+        IF_NOT_NANO_V15("Jet.jetId"),
         IF_NANO_V12("Jet.btagPNetB"),
         IF_NANO_V14("Jet.btagPNetB"),
         IF_NANO_V15("Jet.{btagPNetB,btagUParTAK4B}"),
