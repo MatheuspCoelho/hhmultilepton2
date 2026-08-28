@@ -64,7 +64,7 @@ When you run the command, the setup script will guide you interactively, prompti
 <img width="1336" height="506" alt="image" src="img.png" />
 
 
-Code can now be run but first storage locations for the tasks outputs should be checked as configured [here](https://github.com/HEP-KBFI/hhmultilepton2/blob/main/.setups/template.sh#L21). Currently outputs point to the user store of the `T2_EE_Estonia on manivald` so that outputs are also accessible remotely, but we will likely adapt this over time depending on the output.
+Code can now be run but first storage locations for the tasks outputs should be checked as configured [here](https://github.com/HEP-KBFI/hhmultilepton2/blob/main/.setups/template.sh#L25). Currently outputs point to the user store of the `T2_EE_Estonia on manivald` so that outputs are also accessible remotely, but we will likely adapt this over time depending on the output.
 I.e large outputs available in a remote reachable location, smaller ones on local stores. Larger ones likely also split by user/cluster so that central versions can be reused. Can be configuered [here](https://github.com/HEP-KBFI/hhmultilepton2/blob/main/law_outputs.cfg#L5).
 
 ## Submodules management guide (columnflow, law, order, and cmsdb)
@@ -139,6 +139,9 @@ law run cf.PlotVariables1D \
     --workflow htcondor \  # or
     --workflow crab \      # to be tested!?
 ```
+
+To run lxplus -> CERN HTCondor with outputs on T2_BR_SPRACE, set both `cluster="lxplus"` and
+`MULTILEPTON_CONDOR_SPRACE="true"` at the top of your `.setups/<setup_name>.sh`.
 
 ## Documentation
 
