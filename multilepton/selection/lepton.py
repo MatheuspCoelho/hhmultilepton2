@@ -428,9 +428,10 @@ def electron_selection(
 
         closestjet_indicies = events.Electron.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
-        btag_values_bad = 0 * events.Electron.pt[bad_indicies]
-        btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
-        btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
+        btag_pad = ak.fill_none(ak.pad_none(events.Jet[btag_discriminator], 1, axis=1), 0.0)
+        btag_values = ak.where(
+            bad_indicies, 0.0, btag_pad[ak.where(bad_indicies, 0, closestjet_indicies)],
+        )
         atleast_loose = ((mva_iso_wp80 == 1) | (mva_iso_wp90 == 1))
         if mva_iso_wphzz is not None:
             atleast_loose = atleast_loose | (mva_iso_wphzz == 1)
@@ -717,9 +718,10 @@ def muon_selection(
 
         closestjet_indicies = events.Muon.jetIdx[:, :]
         bad_indicies = (closestjet_indicies == -1)  # set btag to 0 if no closest jet
-        btag_values_bad = 0 * events.Muon.pt[bad_indicies]
-        btag_values_good = events.Jet[closestjet_indicies[~bad_indicies]][btag_discriminator]
-        btag_values = ak.concatenate([btag_values_bad, btag_values_good], axis=1)
+        btag_pad = ak.fill_none(ak.pad_none(events.Jet[btag_discriminator], 1, axis=1), 0.0)
+        btag_values = ak.where(
+            bad_indicies, 0.0, btag_pad[ak.where(bad_indicies, 0, closestjet_indicies)],
+        )
         atleast_medium = ((events.Muon.mediumId == 1) | (events.Muon.tightId == 1))
         atleast_loose = ((events.Muon.looseId == 1) | (events.Muon.mediumId == 1) | (events.Muon.tightId == 1))
         tight_mask = (
