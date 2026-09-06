@@ -59,12 +59,8 @@ multileptons_categories = {
     "noniso": {"id": 13, "selection": "cat_noniso", "label": r"non-iso", "tags": {"noniso"}},  # noqa: E501
     # kinematic categories
     "incl": {"id": 100, "selection": "cat_incl", "label": "inclusive"},
-    "2j": {"id": 110, "selection": "cat_2j", "label": "2 jets"},
-    "dy": {"id": 210, "selection": "cat_dy", "label": "DY enriched"},
     "tt": {"id": 220, "selection": "cat_tt", "label": r"$t\bar{t}$ enriched"},
-    "res1b": {"id": 300, "selection": "cat_res1b", "label": "res1b"},
     "res2b": {"id": 301, "selection": "cat_res2b", "label": "res2b"},
-    "boosted": {"id": 310, "selection": "cat_boosted", "label": "boosted"},
 }
 
 

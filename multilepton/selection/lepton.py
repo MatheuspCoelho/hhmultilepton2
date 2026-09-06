@@ -18,6 +18,7 @@ from columnflow.columnar_util import (
     set_ak_column, sorted_indices_from_mask, flat_np_view, full_like,
 )
 from columnflow.util import maybe_import
+from columnflow.production.cms.jet import jet_id
 
 from multilepton.util import (
     IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_NOT_NANO_V15, IF_RUN_3_2024,
@@ -1179,6 +1180,10 @@ def lepton_selection(
     })
 
     data_stream = self.dataset_inst.name.split("_")[1] if self.dataset_inst.is_data else None
+
+    # ensuring the v15 jetID fix required for the ttbar mr jet selection
+    if self.ffmr and self.config_inst.x.jet_id_has_multiplicity:
+        events = self[jet_id](events, **kwargs)
 
     # ────────────────────────────────────────────────────────────────
     # 2 SECOND LOOP – evaluate every physics channel once
@@ -2709,6 +2714,7 @@ def lepton_selection(
                 mr_btagcut_loose = self.config_inst.x.btag_working_points[mr_btag_tagger]["loose"]
 
                 mr_jet_mask = (
+                    (events.Jet.jetId == 6) &
                     (events.Jet.pt > 20.0) &
                     (abs(events.Jet.eta) < 2.5)
                 )
@@ -3150,6 +3156,10 @@ def lepton_selection(
 def lepton_selection_init(self: Selector, **kwargs) -> None:
     # add column to load the raw tau tagger score
     self.uses.add(f"Tau.raw{self.config_inst.x.tau_tagger}VSjet")
+
+    # ensuring the v15 jetID fix required for the ttbar mr jet selection
+    if self.ffmr and self.config_inst.x.jet_id_has_multiplicity:
+        self.uses.add(jet_id)
 
 
 # fills the measurement regions instead of the physics channels, used by the default_ffmr selector.
