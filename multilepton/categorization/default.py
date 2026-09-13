@@ -577,6 +577,27 @@ def cat_bveto_on(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Arra
     return events, bveto
 
 
+# ── gen-matching categories (nonfakes/fakes/conversions/flips) ────────────
+@categorizer(uses={"gen_match_category"}, call_force=True)
+def cat_nonfakes(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    return events, events.gen_match_category == "nonfakes"
+
+
+@categorizer(uses={"gen_match_category"}, call_force=True)
+def cat_fakes(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    return events, events.gen_match_category == "fakes"
+
+
+@categorizer(uses={"gen_match_category"}, call_force=True)
+def cat_conversions(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    return events, events.gen_match_category == "conversions"
+
+
+@categorizer(uses={"gen_match_category"}, call_force=True)
+def cat_flips(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
+    return events, events.gen_match_category == "flips"
+
+
 @categorizer(uses={"ok_bdt_eormu"})
 def cat_eormu(self: Categorizer, events: ak.Array, **kwargs) -> tuple[ak.Array, ak.Array]:
     return events, events.ok_bdt_eormu == 1

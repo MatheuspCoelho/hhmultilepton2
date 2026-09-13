@@ -59,23 +59,27 @@ def add_lazy_config(
     config_id: int,
     **kwargs,
 ) -> None:
-    """Register a lazily-created configuration into the multilepton analysis."""
 
-    def create_factory(
-        config_id: int,
-        config_name_postfix: str = "",
-    ):
+    """
+    Register a lazily-created configuration into the multilepton analysis.
+
+    File selection (a file count cap, or a specific file range) is not handled here: use the
+    task-level ``--limit-dataset-files`` and workflow ``--branches`` parameters on the plain
+    config instead, so every variant shares the same cached LFN listing and branch numbers map
+    1:1 to real file indices.
+    """
+
+    def create_factory(config_id, config_name_postfix=""):
         def factory(configs):
             mod = importlib.import_module(campaign_module)
             campaign = getattr(mod, campaign_attr)
-            config = add_config(
+            return add_config(
                 analysis_multilepton,
                 campaign.copy(),
                 config_name=config_name + config_name_postfix,
                 config_id=config_id,
                 **kwargs,
             )
-            return config
         return factory
 
     analysis_multilepton.configs.add_lazy_factory(config_name, create_factory(config_id))
@@ -106,4 +110,14 @@ for module, name, cid in datasets:
         campaign_attr=f"campaign_{module.split('.')[-1]}",
         config_name=name,
         config_id=cid,
+    )
+    # dedicated gen-matching-studies variant of the same campaign: the extra columns/categories
+    # are only computed when this config is explicitly selected (--config <name>_genmatch),
+    # not on every default run of the plain config above
+    add_lazy_config(
+        campaign_module=module,
+        campaign_attr=f"campaign_{module.split('.')[-1]}",
+        config_name=f"{name}_genmatch",
+        config_id=cid + 1,
+        enable_gen_matching_studies=True,
     )

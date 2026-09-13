@@ -69,9 +69,9 @@ def hh_truth_selector(
     acoplanarity = 1.0 - delta_phi / np.pi
     acoplanarity = ak.fill_none(acoplanarity, -999.0)
 
-    # cos(theta*) approximation
-    delta_eta = h1.eta - h2.eta
-    costheta_star = np.tanh(delta_eta / 2.0)
+    # cos(theta*): angle of h1 in the HH rest frame
+    h1_boosted = h1.boostCM_of(hh_system)
+    costheta_star = np.cos(h1_boosted.theta)
     costheta_star = ak.fill_none(costheta_star, -999.0)
 
     # ---------------------------------------------------------

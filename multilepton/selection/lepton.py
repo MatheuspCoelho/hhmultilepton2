@@ -21,7 +21,7 @@ from columnflow.util import maybe_import
 from columnflow.production.cms.jet import jet_id
 
 from multilepton.util import (
-    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_NOT_NANO_V15, IF_RUN_3_2024,
+    IF_NANO_V9, IF_NANO_GE_V10, IF_NANO_V12, IF_NANO_V14, IF_NANO_V15, IF_NOT_NANO_V15,
 )
 from multilepton.selection.muon_mva import compute_muon_mva_score
 from multilepton.selection.electron_mva import compute_electron_mva_score
@@ -60,7 +60,7 @@ def trigger_object_matching(
 ) -> ak.Array:
     """
     Helper to check per object in *vectors1* if there is at least one object in *vectors2* that
-    leads to a delta R metric below *threshold*. The final reduction is applied over *axis* of the
+        leads to a delta R metric below *threshold*. The final reduction is applied over *axis* of the
     resulting metric table containing the full combinatorics. If an *event_mask* is given, the
     the matching is performed only for those events, but a full object mask with the same shape as
     that of *vectors1* is returned, which all objects set to *False* where not matching was done.
@@ -238,9 +238,10 @@ def hzz_iso_wp(electron, cuts=None):
         # custom electron LeptonMVA input branches: without these declared here columnflow does
         # not load them, so compute_electron_mva_score silently fed zeros -> degraded score.
         "Electron.{miniPFRelIso_chg,deltaEtaSC,mvaNoIso}", "Jet.nConstituents",
-        # v2 model inputs (jetDF = per-lepton DeepJet disc of associated jet, only exists in 2024)
-        "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Electron.jetDF"),
-        "Jet.{pt,eta,phi}",
+        # v2 model inputs; btagDeepFlavB is read off the matched jet (Electron.jetIdx), not a
+        # per-lepton branch
+        "Electron.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}",
+        "Jet.{pt,eta,phi,btagDeepFlavB}",
         IF_NANO_V12("Electron.{mvaTTH,mvaHZZIso}", "Jet.btagPNetB"),
         IF_NANO_V14("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.btagPNetB"),
         IF_NANO_V15("Electron.{promptMVA,mvaIso_WPHZZ}", "Jet.{btagPNetB,btagUParTAK4B}"),
@@ -559,9 +560,10 @@ def electron_trigger_matching(
         # load them, so compute_muon_mva_score silently fed zeros -> degraded score.
         "Muon.{miniPFRelIso_chg,nTrackerLayers,segmentComp,isTracker,nStations,isGlobal}",
         "Jet.nConstituents",
-        # v2 model inputs (jetDF = per-lepton DeepJet disc of associated jet, only exists in 2024)
-        "Muon.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}", IF_RUN_3_2024("Muon.jetDF"),
-        "Jet.{pt,eta,phi}",
+        # v2 model inputs; btagDeepFlavB is read off the matched jet (Muon.jetIdx), not a
+        # per-lepton branch
+        "Muon.{pfRelIso03_all,jetNDauCharged,jetPtRelv2}",
+        "Jet.{pt,eta,phi,btagDeepFlavB}",
         IF_NANO_V12("Muon.mvaTTH", "Jet.btagPNetB"),
         IF_NANO_V14("Muon.promptMVA", "Jet.btagPNetB"),
         IF_NANO_V15("Muon.promptMVA", "Jet.{btagPNetB,btagUParTAK4B}"),
@@ -1001,7 +1003,7 @@ def tau_trigger_matching(
         "ok_bdt_eormu",
         "TauIso", "TauNoID",
         "MuonLoose", "MuonTight", "Muon.cone_pt", "Muon.muonLeptoMVA_hh",
-        "ElectronLoose", "ElectronTight", "Electron.cone_pt",
+        "ElectronLoose", "ElectronTight", "Electron.cone_pt", "Electron.electronLeptoMVA_hh",
     },
     # when True, evaluate the measurement regions instead of the physics channels
     ffmr=False,

@@ -150,12 +150,10 @@ def compute_electron_mva_score(events) -> "ak.Array":  # noqa: F821
     el_deltaEtaSC = _opt_flat(electron, "deltaEtaSC")
     el_eInvMinusPInv = _opt_flat(electron, "eInvMinusPInv")
     el_mvaNoIso = _opt_flat(electron, "mvaNoIso")
-    # v2 model inputs (direct per-electron NanoAOD branches). jetDF is the DeepJet discriminator
-    # of the associated jet stored on the lepton (0 if none); it only exists in 2024 NanoAOD.
+    # v2 model inputs (direct per-electron NanoAOD branches)
     el_pfreliso03 = _opt_flat(electron, "pfRelIso03_all")
     el_jetndau = _opt_flat(electron, "jetNDauCharged")
     el_jetptrelv2 = _opt_flat(electron, "jetPtRelv2")
-    el_jetdf = _opt_flat(electron, "jetDF")
     # DIAGNOSTIC (test A): the v2 scaler expects jetPtRelv2 ~ 0 (train std 0.017); feeding the
     # real ~GeV branch pushes it ~350 sigma out of distribution and collapses the model. Set
     # MVA_ZERO_JETPTRELV2=1 to feed 0 (== training mean, in-distribution) and see if AUC recovers.
@@ -222,6 +220,7 @@ def compute_electron_mva_score(events) -> "ak.Array":  # noqa: F821
 
     matched_bpnet = _gather_jet(_opt_jet_branch("btagPNetB"))
     matched_ncon = _gather_jet(_opt_jet_branch("nConstituents"))
+    matched_btagdeepflavb = _gather_jet(_opt_jet_branch("btagDeepFlavB"))
 
     # Flatten valid mask to 1D numpy bool
     valid_flat = ak.to_numpy(ak.flatten(valid_ak)).astype(bool)
@@ -259,6 +258,7 @@ def compute_electron_mva_score(events) -> "ak.Array":  # noqa: F821
     # B-tagging and nTracks (0 if no matched jet)
     btagPNetB = np.where(valid_flat, matched_bpnet, 0.0).astype(np.float32)
     ntracks = np.where(valid_flat, matched_ncon, 0.0).astype(np.float32)
+    btagDeepFlavB = np.where(valid_flat, matched_btagdeepflavb, 0.0).astype(np.float32)
 
     # Build feature dictionary with all computed features. feat_order (from the loaded
     # *_features.pkl) selects which of these the current model actually consumes, so leaving
@@ -282,7 +282,7 @@ def compute_electron_mva_score(events) -> "ak.Array":  # noqa: F821
         "mvaNoIso": el_mvaNoIso,
         # v2 inputs
         "pfRelIso03_all": el_pfreliso03,
-        "btagDeepFlavB": el_jetdf,  # nano per-lepton jetDF (DeepJet disc of associated jet)
+        "btagDeepFlavB": btagDeepFlavB,  # nearest-jet btagDeepFlavB (via jetIdx matching)
         "jetNDauCharged": el_jetndau,
         "jetPtRelv2": el_jetptrelv2,
     }
